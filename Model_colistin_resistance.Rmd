@@ -1,0 +1,480 @@
+---
+title: "Estimating the effect of AMU on colistin resistance in chicken farms"
+csl: the-american-naturalist.csl
+output:
+  html_document:
+    theme: cerulean
+    toc: yes
+  pdf_document:
+    toc: yes
+<!-- bibliography: references.bib -->
+---
+
+<!--
+IMAGES:
+Insert them with: ![alt text](image.png)
+You can also resize them if needed: convert image.png -resize 50% image.png
+If you want to center the image, go through HTML code:
+<div style="text-align:center"><img src ="image.png"/></div>
+
+REFERENCES:
+For references: Put all the bibTeX references in the file "references.bib"
+in the current folder and cite the references as @key or [@key] in the text.
+Uncomment the bibliography field in the above header and put a "References"
+title wherever you want to display the reference list.
+-->
+
+<style type="text/css">
+.main-container {
+  max-width: 1370px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+```{r general_options, include = FALSE}
+knitr::knit_hooks$set(
+  margin = function(before, options, envir) {
+    if (before) par(mgp = c(1.5, .5, 0), bty = "n", plt = c(.105, .97, .13, .97))
+    else NULL
+  },
+  prompt = function(before, options, envir) {
+    options(prompt = if (options$engine %in% c("sh", "bash")) "$ " else "> ")
+  })
+
+knitr::opts_chunk$set(margin = TRUE, prompt = TRUE, comment = "",
+                      collapse = TRUE, cache = FALSE, autodep = TRUE,
+                      dev.args = list(pointsize = 11), fig.height = 3.5,
+                      fig.width = 4.24725, fig.retina = 2, fig.align = "center")
+
+options(width = 137)
+```
+
+The objective is to build a dynamic model allowing to estimate the effect of antimicrobial usage (AMU), particularly colistin, on colistin resistance in ViParc chicken farms. Available data is:
+
+* Data on ViParc farms, including AMU: [ViParc data overview](https://rpubs.com/choisy/viparc_data).
+* During each production cycle, 3 pooled chicken faeces samples are collected: at the beginning, in the middle and at the end of the cycle. Each pooled sample is believed to represent the faeces of around 50 individual chickens at the sampling day. The proportion of colonies of each  sample that are colistin resistant is determined. Here, a production cycle is assumed to last exactly 16 weeks.The samplings are assumed to occur on weeks 1, 9 and 16.
+
+## Data
+
+We clean work environment and load needed packages.
+
+We determine the number of samplings performed in farms.
+In the actual study, this number is 3. It is possible to check out the case this number would be 6.
+
+The number of farms studied is set to 20, and the number of weeks in a production cycle to 16.
+```{r}
+rm(list=ls(all=TRUE))
+library(deSolve)
+library(bbmle)
+library(ggplot2)
+
+n_samp = 3 # 3 or 6
+n_farms = 20 # Should not be changed for now
+n_weeks = 16 # Should not be changed for now
+```
+
+### AMU data
+
+We load real AMU ViParc data.
+
+```{r}
+amu_viparc = as.data.frame(read.table("C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/viparc.csv", sep=",", header=T))
+```
+
+We create a matrix containing binary information on AMU (antimicrobial used / not used) for each week (columns) of the production cycle and for each farm (rows): `ab_expo`.
+
+Several cases are possible regarding the farms selected to perform microbiological analyses, and regarding what antibiotics are studied for their effect on colistin resistance.
+
+* Case 1 (`case_amu` = 1). We are interested in colistin usage only. The farms analysed are the 10 first farms using colistin + 10 farms using no colistin.
+* Case 2 (`case_amu` = 2). We are interested in colistin usage only. The farms analysed are the 10 first farms using colistin on week 8 (one week before the 2nd sampling) + 10 farms using no colistin.
+* Case 3 (`case_amu` = 3). We are interested in global AMU. The farms analysed are the 20 first farms with a production cycle of `n_weeks` weeks or more.
+
+```{r}
+case_amu = 2
+```
+
+```{r}
+if (case_amu == 1){
+
+  farms_using_col = names(table(factor(amu_viparc$USUBJID[which(amu_viparc$colistin == T)])))
+  ab_expo = matrix(0, 10, n_weeks)
+  for(i in 1:10){
+    farm_i = farms_using_col[i]
+    weeks_use = amu_viparc$WEEK[which((amu_viparc$USUBJID == farm_i)&(amu_viparc$FLOCKSEQUENCE == 1)&(amu_viparc$colistin == T))]
+    ab_expo[i, weeks_use[which(weeks_use <= n_weeks)]] = 1
+  }
+  ab_expo = rbind(ab_expo, matrix(0,10,n_weeks))
+  rm(i, farms_using_col, weeks_use, farm_i)
+  print("Case 1 chosen.")
+
+}else if (case_amu == 2){
+
+  f_using_col_before_week_9 = amu_viparc[which(amu_viparc$WEEK %in% c(8) & amu_viparc$colistin == T), c("USUBJID","FLOCKSEQUENCE")]
+  f_using_col_before_week_9 = f_using_col_before_week_9[which(duplicated(f_using_col_before_week_9)==F),]
+  if (nrow(f_using_col_before_week_9) <10){print("Number of adequate farms is less than 10")}
+
+  ab_expo = matrix(0, 10, n_weeks)
+  for(i in 1:10){
+    farm_i = f_using_col_before_week_9$USUBJID[i]
+    flockseq_i = f_using_col_before_week_9$FLOCKSEQUENCE[i]
+    weeks_use = amu_viparc$WEEK[which((amu_viparc$USUBJID == farm_i)&(amu_viparc$FLOCKSEQUENCE == flockseq_i)&(amu_viparc$colistin == T))]
+    ab_expo[i, weeks_use[which(weeks_use <= n_weeks)]] = 1
+  }
+  ab_expo = rbind(ab_expo, matrix(0,10,n_weeks))
+  rm(i, f_using_col_before_week_9, weeks_use, farm_i, flockseq_i)
+  print("Case 2 chosen.")
+
+}else if (case_amu == 3){
+
+  ab_expo = matrix(0, n_farms, n_weeks)
+  iter_farm = 0
+  for (i in 1:n_farms){
+    weeks_cycle = c()
+    while(!(n_weeks %in% weeks_cycle)){
+      iter_farm = iter_farm + 1
+      if(iter_farm == (length(names(table(factor(amu_viparc$USUBJID)))) +1)){print("No more farm respecting the criteria")}
+
+      farm_i = names(table(factor(amu_viparc$USUBJID)))[iter_farm]
+      weeks_cycle = amu_viparc$WEEK[which((amu_viparc$USUBJID==farm_i)&(amu_viparc$FLOCKSEQUENCE==1))]
+    }
+
+    weeks_use = c()
+    for (w in 1:n_weeks){
+      weeks_use = c(weeks_use, as.numeric(sum(as.numeric(amu_viparc[which((amu_viparc$USUBJID == farm_i)&(amu_viparc$FLOCKSEQUENCE == 1)&(amu_viparc$WEEK == w)),(10:53)])) != 0))
+    }
+    ab_expo[i,] = weeks_use
+  }
+  rm(i, w, iter_farm, weeks_use, weeks_cycle, farm_i)
+  print("Case 3 chosen.")
+
+}else{
+  print("This case doesn't exist.")
+}
+```
+
+### Simulated colistin resistance data
+
+As colistin resistance data is not available yet, we simulate colistin resistance data using our model. We assume samples occur on weeks 1, 9 and 16 when 3 samples are collected. In the case 6 samples are collected, they occur on weeks 1, 4, 7, 10, 13, 16.
+
+We present in the following different models. A specific dataset will be simulated for each of these models.
+
+## Model 1: Global resistance on farm
+
+In this simple model, we study the global microbiote on farm, and consider the variable $R_f(t)$ representing the proportion of bacteria presenting a colistin resistance phenotype in a farm f. As sums of proportions of sensitive and resistant bacteria is 1, we only focus on the proportion of resistant bacteria.
+
+For a given farm f, we define the model as follows:
+$$ \frac{dR_f}{dt} = 1-(1 + A.\alpha ^ {E_f(t)}).R_f(t) $$
+where $E_f(t)$ is AMU (0 or 1) in farm i, at week t.
+
+$A$ and $\alpha$ must be strictly positive. $\alpha$ represents the effect of AMU on colistin resistance dynamics:
+
+* If $\alpha = 1$, AMU has no effect on colistin resistance.
+* If $\alpha < 1$, AMU increases colistin resistance on farm.
+* If $\alpha > 1$, AMU decreases colistin resistance on farm.
+
+```{r}
+eq_mod=function(t, R, param){
+  alpha = param[[1]]
+  A = param[[2]]
+  ab_expo_farm = param[[3]]
+  
+  dR = 1 - (1 + A * (alpha ^ ab_expo_farm[t])) * R
+  
+  return(list(dR))
+}
+```
+
+### Simulated "observed" colistin resistance data
+
+We first draw the initial proportion of resistance in the `n_farms` farms.
+
+```{r}
+obs_init_true = runif(n_farms,0,1)
+```
+
+We then simulate resistance data for the 2 others samples in each farm, using the model defined earlier, adding some stochastic noise for these "observed" samples. Parameters for the simulated data are: $\alpha = 0.2$ (`alpha_true`) and $A = 2$ (`A_true`).
+
+It is possible to plot the simulated "observed" data for each farm, by setting `plot_sim_data = T`. In this case, dotted lines represent the sampling dates. Black bars represent AMU dates in farms.
+
+```{r}
+plot_sim_data = F
+```
+
+```{r}
+if (n_samp == 3){obs = matrix(NA, n_farms, 3)}else if (n_samp == 6){obs = matrix(NA, n_farms, 6)}
+obs[,1] = obs_init_true
+alpha_true = 0.2
+A_true = 2
+for(farm in 1:n_farms){
+  simul_det = ode(obs_init_true[farm], 1:n_weeks, eq_mod, list(alpha_true, A_true, ab_expo[farm,]))[,2]
+  simul_stoch = rnorm(n=n_weeks, mean=simul_det, sd=0.02)
+
+  if (n_samp == 3){
+    obs[farm,(2:3)] = simul_stoch[c(9,16)]
+  }else if (n_samp == 6){
+    obs[farm,(2:6)] = simul_stoch[seq(4,16,3)]
+  }
+  
+  if(plot_sim_data){
+    plot(simul_stoch, main=paste0("Simulated data for farm ", farm), ylim=c(0,1), type="l",
+         xlab="Time (weeks)", ylab="Proportion of resistant colonies R(t)")
+    for (i in 1:length(ab_expo[farm,])){
+      if (ab_expo[farm,i] == 1){
+        rect(xleft = i-0.5, xright = i+0.5, ybottom = 1, ytop = 1.1, col = "black")
+      }
+    }
+  
+    if (n_samp == 3){
+      for(i in c(1,9,16)){
+        lines(x=c(i,i), y=c(-1,2), lt="dashed")
+      }
+    }else if (n_samp == 6){
+      for(i in seq(1,16,3)){
+        lines(x=c(i,i), y=c(-1,2), lt="dashed")
+      }
+    }
+  }
+}
+```
+
+### Parameters estimation
+
+We first define functions with model's parameters as inputs, and as ouput:
+
+* run1: Squared residuals sum
+* run2: Likelihood with residuals drawn in a Gaussian or Beta
+```{r}
+run1 = function(param){
+  alpha = param[1]
+  A = param[2]
+
+  pred = matrix(NA, n_farms, n_weeks)
+  for (farm in 1:n_farms){
+    pred[farm,] = ode(obs[farm, 1], 1:n_weeks, eq_mod, list(alpha, A, ab_expo[farm,]))[,2]
+  }
+
+  if (n_samp == 3){
+    pred_sampl_dates = pred[,c(1,9,16)]
+    colnames(pred_sampl_dates) = colnames(obs) = c("S1","S2","S3")
+  }else if (n_samp == 6){
+    pred_sampl_dates = pred[,seq(1,16,3)]
+    colnames(pred_sampl_dates) = colnames(obs) = c("S1","S2","S3","S4","S5","S6")
+  }
+
+  to_min = sum((pred_sampl_dates-obs)^2)
+
+  return(to_min)
+  # return(list(to_min, pred))
+}
+
+run2 = function(alpha, A, k){
+
+  pred = matrix(NA, n_farms, n_weeks)
+  for (farm in 1:n_farms){
+    pred[farm,] = ode(obs[farm, 1], 1:n_weeks, eq_mod, list(alpha, A, ab_expo[farm,]))[,2]
+  }
+
+  if (n_samp == 3){
+    pred_sampl_dates = pred[,c(1,9,16)]
+    colnames(pred_sampl_dates) = colnames(obs) = c("S1","S2","S3")
+  }else if (n_samp == 6){
+    pred_sampl_dates = pred[,seq(1,16,3)]
+    colnames(pred_sampl_dates) = colnames(obs) = c("S1","S2","S3","S4","S5","S6")
+  }
+
+  # return(-sum(dnorm(x=obs, mean=pred_sampl_dates, sd=k, log=T)))
+  return(-sum(dbeta(x=obs, shape1=k, shape2=k*(1.00001-pred_sampl_dates)/(pred_sampl_dates+0.00001), log=T)))
+}
+```
+
+
+#### Using "optim" function for point estimates
+
+```{r}
+# fit = optim(par=c(1,1), fn=run1)
+# print(fit$par)
+```
+
+#### Using "bbmle" package for point estimates, confidence intervals and likelihood profiles
+
+```{r}
+fit_mle2 = mle2(minuslogl = run2, start = list(alpha=1, A=1, k=1), lower=c(alpha=10^-5, A=10^-5, k=10^-5))
+fit_coef = coef(fit_mle2)
+print(fit_coef)
+# prof = profile(fit_mle2)
+# plot(prof)
+# conf = confint(fit_mle2)
+# print(conf)
+```
+
+### Plot of model predictions
+
+We plot observations (red dots) and model predictions (black line and CI) for `farms_plot` farms (including 2 farms using colistin): farms 1, 2, 11, 12.
+
+AMU is represented as blue bars.
+
+```{r}
+farms_plot = c(1,2,11,12)
+```
+
+```{r echo=F}
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  # Multiple plot function
+  # Source: http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)
+  # 
+  # ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+  # - cols:   Number of columns in layout
+  # - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+  #
+  # If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+  # then plot 1 will go in the upper left, 2 will go in the upper right, and
+  # 3 will go all the way across the bottom.
+
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+  if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+```{r warning=F}
+pred_vs_obs = data.frame(farm=rep(NA, n_farms*n_weeks), week=rep(NA, n_farms*n_weeks), obs=rep(NA, n_farms*n_weeks), pred_val=rep(NA, n_farms*n_weeks), pred_inf=rep(NA, n_farms*n_weeks), pred_sup=rep(NA, n_farms*n_weeks), exp_ab=rep(NA, n_farms*n_weeks))
+pred_vs_obs$farm = as.vector(matrix(rep(seq(1,n_farms),n_weeks), n_weeks, n_farms, byrow=T))
+pred_vs_obs$week = rep(seq(1,n_weeks),n_farms)
+for (f in 1:n_farms){
+  if (n_samp == 3){
+    pred_vs_obs$obs[which((pred_vs_obs$farm==f) & (pred_vs_obs$week %in% c(1,9,16)))] = obs[f,]
+  }else if (n_samp == 6){
+    pred_vs_obs$obs[which((pred_vs_obs$farm==f) & (pred_vs_obs$week %in% seq(1,16,3)))] = obs[f,]
+  }
+
+  predict_farm = ode(obs[f, 1], 1:n_weeks, eq_mod, list(fit_coef[1], fit_coef[2], ab_expo[f,]))[,2]
+  pred_vs_obs$pred_val[which(pred_vs_obs$farm == f)] = predict_farm
+
+  # Si ecarts suivent une loi beta:
+  pred_vs_obs$pred_inf[which(pred_vs_obs$farm == f)] = qbeta(p=0.025, shape1=fit_coef[3], shape2=fit_coef[3]*(1.00001-predict_farm)/(predict_farm+0.00001))
+  pred_vs_obs$pred_sup[which(pred_vs_obs$farm == f)] = qbeta(p=0.975, shape1=fit_coef[3], shape2=fit_coef[3]*(1.00001-predict_farm)/(predict_farm+0.00001))
+
+  pred_vs_obs$exp_ab[which(pred_vs_obs$farm == f)] = ab_expo[f,]
+
+}
+pred_vs_obs$exp_ab[pred_vs_obs$exp_ab == 0] = NA
+
+pl = list()
+iter_list = 0
+for (far in farms_plot){
+  iter_list = iter_list + 1
+  p = ggplot(data=pred_vs_obs[which(pred_vs_obs$farm==far),], aes(x=week)) + xlab("Time (weeks)") + ylab("Prop. of resistant colonies R(t)") + ggtitle(paste0("Farm ",far))
+  p = p + ylim(0,1)
+  p = p + geom_ribbon(aes(ymin=pred_inf, ymax=pred_sup), color="black", alpha=1/4, fill="#E69F00")
+  p = p + geom_line(aes(y=pred_val), col="black", size=1)
+  p = p + geom_point(aes(y = obs), size = 3, shape = 21,  fill = "red", color = "black")
+  p = p + geom_rect(aes(xmin=week*exp_ab-0.5, xmax=week*exp_ab+0.5, ymin=0.97, ymax=1), fill="blue")
+  pl[[iter_list]] = p
+}
+multiplot(plotlist=pl, cols=2)
+```
+
+
+## Model 2: Metapopulation of chicken intestinal microbiotes
+
+In this model, we study the interaction of individual chicken microbiotes with farms environment. In a given farm f, we consider the variable $R_i(t)$ representing the proportion of bacteria presenting a colistin resistance phenotype in a chicken i. $R_e(t)$ is the proportion of resistant bacteria in the environment of the farm. We consider the transmission of bacteria between chickens only occurs through the environment.
+
+As the sum of proportions of sensitive and resistant bacteria is 1, we only focus on the proportion of resistant bacteria.
+
+For a given farm f housing $N_{chi}$ (`N_chi`) chickens, we define the model as follows:
+
+$$\begin{align*}
+  \forall i \in [1;N_{chi}],	\frac{dR_i}{dt} &= 1-(1 + A.\alpha ^ {E_f(t)}).R_i(t) + \beta_1.(1-\frac{R_i(t)}{R_e(t)})\\
+  \frac{dR_e}{dt} &= \beta_2.(1-\frac{R_e(t)}{\overline{R_i(t)}})
+\end{align*}$$
+
+where $E_f(t)$ is AMU (0 or 1) in farm f, at week t.
+
+$A$, $\beta_1$, $\beta_2$ and $\alpha$ must be strictly positive.
+
+$\beta_1$ and $\beta_2$ represent the transmission of resistant bacteria from environment to chicken guts, and from chicken guts to environment, respectively.
+
+$\alpha$ represents the effect of AMU on colistin resistance dynamics:
+
+* If $\alpha = 1$, AMU has no effect on colistin resistance.
+* If $\alpha < 1$, AMU increases colistin resistance in chicken guts.
+* If $\alpha > 1$, AMU decreases colistin resistance in chicken guts.
+
+<!-- ```{r} -->
+<!-- eq_mod=function(t, R, param){ -->
+<!--   N_chi_farm = param[[1]] -->
+<!--   alpha = param[[2]] -->
+<!--   A = param[[3]] -->
+<!--   beta1 = param[[4]] -->
+<!--   beta2 = param[[5]] -->
+<!--   ab_expo_farm = param[[6]] -->
+
+<!--   Re = R[1] -->
+<!--   dR = rep(NA, N_chi_farm + 1) -->
+
+<!--   dR[1] = beta2 * (1 - Re/(0.00001 + mean(R[2:(N_chi_farm + 1)]))) -->
+<!--   for(i in 2:(N_chi_farm + 1)){ -->
+<!--     dR[i] = 1 - (1 + A * (alpha ^ ab_expo_farm[t])) * R + beta1 * (1-R[i]/(0.00001 + Re)) -->
+<!--   } -->
+
+<!--   return(list(dR)) -->
+<!-- } -->
+<!-- ``` -->
+
+## Model 3: "R" and "S" chicken individuals
+
+In this model, we consider a given chicken can be either R (carries resistant bacteria) or S (does not carry resistant bacteria). In a given farm f, we consider the variables $R_c(t)$ representing the number of R chickens and $S_c(t)$ the number of S chickens.
+
+$N_{chi} = S_c(t) + R_c(t)$ is the number of chickens in farm f.
+
+We also introduce $R_s(t)$ the proportion of resistant bacteria in the pooled faeces sample collected in farm f at time t.
+
+$$\begin{align*}
+  \frac{dR_c}{dt} &= \beta.\alpha^{E_f(t)}.S_c(t).\frac{R_c(t)}{N_{chi}} - \gamma.Rc(t)\\
+  \frac{dS_c}{dt} &= -\beta.\alpha^{E_f(t)}.S_c(t).\frac{R_c(t)}{N_{chi}} + \gamma.R_c(t)\\
+  \frac{dR_s}{dt} &= p_1.\frac{R_c(t)}{N_{chi}} + p_2.\frac{S_c(t)}{N_{chi}}
+\end{align*}$$
+
+where:
+
+* $p_1$ is the proportion of gut bacteria of a "R" chicken that are resistant
+* $p_2$ is the proportion of gut bacteria of a "S" chicken that are resistant
+* $E_f(t)$ is AMU (0 or 1) in farm f, at week t
+* $\beta$ represents the transmission rate of resistant bacteria from "R" chickens to "S" chickens
+* $\gamma$ represents the clearance rate of resistant bacteria from "R" chickens
+* $\alpha$ represents the effect of AMU on colistin resistance dynamics:
+  * If $\alpha = 1$, AMU has no effect on colistin resistance.
+  * If $\alpha < 1$, AMU decreases resistance transmission rate between chickens.
+  * If $\alpha > 1$, AMU increases resistance transmission rate between chickens.
+
