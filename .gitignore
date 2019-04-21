@@ -1,0 +1,9 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.xls
+*.xlsx
+.DS_Store
+*.Rproj
+esvac.txt
