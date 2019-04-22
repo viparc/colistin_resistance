@@ -1,0 +1,9 @@
+name: "my-website-name"
+output_dir: "."
+navbar:
+  title: "Colistin resistance"
+  left:
+    - text: "Overview"
+      href: index.html
+    - text: "Data generation"
+      href: make_data.html

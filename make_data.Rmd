@@ -3,7 +3,7 @@ title: "Generating the data from the CliRes database (and other data sets)"
 csl: the-american-naturalist.csl
 output:
   html_document:
-    theme: cerulean
+    theme: cosmo
     toc: yes
   pdf_document:
     toc: yes
