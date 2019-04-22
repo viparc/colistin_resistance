@@ -1,13 +1,9 @@
 ---
 title: "Generating the data from the CliRes database (and other data sets)"
-csl: the-american-naturalist.csl
 output:
   html_document:
     theme: cosmo
-    toc: yes
-  pdf_document:
-    toc: yes
-<!-- bibliography: references.bib -->
+    toc: true
 editor_options: 
   chunk_output_type: console
 ---
@@ -18,21 +14,8 @@ Insert them with: ![alt text](image.png)
 You can also resize them if needed: convert image.png -resize 50% image.png
 If you want to center the image, go through HTML code:
 <div style="text-align:center"><img src ="image.png"/></div>
-
-REFERENCES:
-For references: Put all the bibTeX references in the file "references.bib"
-in the current folder and cite the references as @key or [@key] in the text.
-Uncomment the bibliography field in the above header and put a "References"
-title wherever you want to display the reference list.
 -->
 
-<style type="text/css">
-.main-container {
-  max-width: 1370px;
-  margin-left: auto;
-  margin-right: auto;
-}
-</style>
 
 ```{r general_options, include = FALSE}
 knitr::knit_hooks$set(
