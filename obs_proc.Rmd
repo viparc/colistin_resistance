@@ -1,0 +1,245 @@
+---
+title: "Testing the observation process in Model 3"
+csl: the-american-naturalist.csl
+output:
+  html_document:
+    theme: cerulean
+    toc: yes
+  pdf_document:
+    toc: yes
+<!-- bibliography: references.bib -->
+---
+
+<!--
+IMAGES:
+Insert them with: ![alt text](image.png)
+You can also resize them if needed: convert image.png -resize 50% image.png
+If you want to center the image, go through HTML code:
+<div style="text-align:center"><img src ="image.png"/></div>
+
+REFERENCES:
+For references: Put all the bibTeX references in the file "references.bib"
+in the current folder and cite the references as @key or [@key] in the text.
+Uncomment the bibliography field in the above header and put a "References"
+title wherever you want to display the reference list.
+-->
+
+<style type="text/css">
+.main-container {
+  max-width: 1370px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+```{r general_options, include = FALSE}
+knitr::knit_hooks$set(
+  margin = function(before, options, envir) {
+    if (before) par(mgp = c(1.5, .5, 0), bty = "n", plt = c(.105, .97, .13, .97))
+    else NULL
+  },
+  prompt = function(before, options, envir) {
+    options(prompt = if (options$engine %in% c("sh", "bash")) "$ " else "> ")
+  })
+
+knitr::opts_chunk$set(margin = TRUE, prompt = TRUE, comment = "",
+                      collapse = TRUE, cache = FALSE, autodep = TRUE,
+                      dev.args = list(pointsize = 11), fig.height = 3.5,
+                      fig.width = 4.24725, fig.retina = 2, fig.align = "center")
+
+options(width = 137)
+```
+
+The AMR data available is the count of colistin resistant colonies in a pooled sample of faeces from a limited number of chickens at a precise date, in a given farm. For now, we consider, the collected faeces are those from  `n_chick_samp = 50` chickens, no matter the farm size, because the density of chickens is supposed to remain the same in all farms, and because the area of the sheeting used to collect the faeces does not change.
+
+Here, we consider the Model 3 described in *Model_colistin_resistance.Rmd*.
+
+We investigate the relationship between the proportion of "R" individual chickens (i.e. chickens carrying resistant bacteria, as opposed to "S" chickens) in the farm, and the proportion of resistant colonies described above.
+
+## Definitions
+
+As described in Model 3:
+
+$$R_e = p_R.r_{sample} + p_S.s_{sample}$$
+where:
+
+* $R_e$ is the proportion of resistant colonies in the pooled sample
+* $r_{sample} = \frac{R_{sample}}{S_{sample}+R_{sample}}$ is the proportion of "R" chickens among chickens whose faeces were collected
+* $s_{sample} = \frac{S_{sample}}{S_{sample}+R_{sample}}$ is the proportion of "S" chickens among chickens whose faeces were collected
+* $p_R$ (resp. $p_S$) is the proportion of the gut bacteria which are resistant in "R" (resp. "S") chickens
+* $p_R \geq p_S$
+
+Note there is a stochastic process during the sample of chickens whose samples are collected.
+
+We define the ratio $Q$ as:
+
+$$ Q = \frac{r_{farm}}{R_e} $$
+where $r_{farm} = \frac{R_{farm}}{S_{farm}+R_{farm}}$ is the total proportion of "R" chickens on farm.
+
+If $Q \approx 1$, it means the count of resistant colonies is a good proxy of the prevalence of resistance in chickens.
+
+We load the *obs_process* and the *multiplot* functions:
+
+```{r, warning=F}
+library(ggplot2)
+n_chick_samp = 50
+source("model3_fcts.R")
+```
+
+```{r echo=F}
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  # Multiple plot function
+  # Source: http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)
+  # 
+  # ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+  # - cols:   Number of columns in layout
+  # - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+  #
+  # If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+  # then plot 1 will go in the upper left, 2 will go in the upper right, and
+  # 3 will go all the way across the bottom.
+
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+  if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+We define a function *plot_Q* for plotting the mean value of $Q$ (out of 100 simulations) depending on $p_R$ and $p_S$.
+
+```{r}
+plot_Q = function(S_farm, R_farm, val_pS=seq(0,1,0.05), val_pR=seq(0,1,0.05), n_chick_samp=50){
+
+  sens_an = as.data.frame(matrix(NA, length(val_pS)*length(val_pR), 3))
+  colnames(sens_an) = c("val_pS", "val_pR", "val_proxy")
+  sens_an$val_pS = rep(val_pS, length(val_pR))
+  sens_an$val_pR = as.vector(matrix(rep(val_pR, length(val_pS)), length(val_pS), length(val_pR), byrow=T))
+  
+  for(pS in val_pS){
+    for(pR in val_pR[which(val_pR >= pS)]){
+      Q_rat = c()
+      for (iter in 1:100){
+        Q_rat = c(Q_rat, obs_process(c(S_farm, R_farm), list(n_chick_samp, pS, pR)))
+      }
+      sens_an$val_proxy[which((sens_an$val_pS == pS) & (sens_an$val_pR == pR))] = (R_farm /(S_farm + R_farm))/mean(Q_rat)
+    }
+  }
+  sens_an$val_proxy[which(sens_an$val_proxy > 2)] = 2
+  
+  p = ggplot(data = sens_an, aes(x=val_pS, y=val_pR))
+  p = p + ggtitle(paste0("Value of Q with S=",S_farm," and R=",R_farm))
+  p = p + xlab("pS")
+  p = p + ylab("pR")
+  p = p + geom_tile(aes(fill = val_proxy))
+  p = p + scale_fill_gradient2("Q", low = rgb(1,0,0), mid = rgb(1,1,1), high = rgb(0,0,1), midpoint = 1, na.value = rgb(0,0,0))
+  p
+  
+  return(p)
+}
+```
+*Note*: The value of $Q$ is limited to 2 for illustration efficiency.
+
+## Impact of $p_R$ and $p_S$ on the value of $Q$
+
+By definition, $p_R$ and $p_S$ affect $Q$.
+
+For instance, if $R_{farm} = 60$ and $S_{farm} = 40$:
+
+```{r}
+plot_Q(S_farm=40, R_farm= 60)
+```
+
+## Mean value of $Q$ depending on the prevalence of resistance
+
+Here, we consider a fixed farm size of 100 chickens.
+
+We investigate how the mean value of $Q$ changes with the proportion of "R" chickens (20%, 50% and 80%).
+
+```{r}
+p1 = plot_Q(S_farm=80, R_farm=20)
+p2 = plot_Q(S_farm=50, R_farm=50)
+p3 = plot_Q(S_farm=20, R_farm=80)
+
+multiplot(p1,p2,p3)
+
+```
+
+The only values of $p_R$ and $p_S$ that ensure a value of $Q \approx 1$ no matters the prevalence are $p_R = 1$ and $p_S = 0$ (which makes sense).
+
+## Variability of $Q$ depending on the farm size
+
+We define a function *plot_sd_Q* that is similar to *plot_Q* excepted it plots the Standard Deviation of Q.
+
+```{r}
+plot_sd_Q = function(S_farm, R_farm, val_pS=seq(0,1,0.05), val_pR=seq(0,1,0.05), n_chick_samp=50){
+
+  sens_an = as.data.frame(matrix(NA, length(val_pS)*length(val_pR), 3))
+  colnames(sens_an) = c("val_pS", "val_pR", "val_proxy")
+  sens_an$val_pS = rep(val_pS, length(val_pR))
+  sens_an$val_pR = as.vector(matrix(rep(val_pR, length(val_pS)), length(val_pS), length(val_pR), byrow=T))
+  
+  for(pS in val_pS){
+    for(pR in val_pR[which(val_pR >= pS)]){
+      Q_rat = c()
+      for (iter in 1:100){
+        Q_rat = c(Q_rat, obs_process(c(S_farm, R_farm), list(n_chick_samp, pS, pR)))
+      }
+      sens_an$val_proxy[which((sens_an$val_pS == pS) & (sens_an$val_pR == pR))] = sd(Q_rat)
+    }
+  }
+
+  p = ggplot(data = sens_an, aes(x=val_pS, y=val_pR))
+  p = p + ggtitle(paste0("Value of Q with S=",S_farm," and R=",R_farm))
+  p = p + xlab("pS")
+  p = p + ylab("pR")
+  p = p + geom_tile(aes(fill = val_proxy))
+  p = p + scale_fill_gradient2("Q sd", low = rgb(1,1,1), mid = rgb(1,1,0.5), midpoint = 0.03, na.value = rgb(0,0,0))
+  p
+  
+  return(p)
+}
+```
+
+With a same prevalence of 60%, we test several farm sizes: 100, 1000, 10000.
+
+```{r}
+p1 = plot_sd_Q(S_farm=40, R_farm=60)
+p2 = plot_sd_Q(S_farm=400, R_farm=600)
+p3 = plot_sd_Q(S_farm=4000, R_farm=6000)
+
+multiplot(p1,p2,p3)
+
+```
+
+The variability of $Q$ seems to increase with the farm size, which makes sense regarding the fixed sample size (`n_chick_samp = 50`).
+

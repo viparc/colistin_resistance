@@ -198,7 +198,7 @@ We then simulate resistance data for the 2 others samples in each farm, using th
 It is possible to plot the simulated "observed" data for each farm, by setting `plot_sim_data = T`. In this case, dotted lines represent the sampling dates. Black bars represent AMU dates in farms.
 
 ```{r}
-plot_sim_data = F
+plot_sim_data = T
 ```
 
 ```{r}
@@ -463,13 +463,13 @@ We also introduce $R_s(t)$ the proportion of resistant bacteria in the pooled fa
 $$\begin{align*}
   \frac{dR_c}{dt} &= \beta.\alpha^{E_f(t)}.S_c(t).\frac{R_c(t)}{N_{chi}} - \gamma.Rc(t)\\
   \frac{dS_c}{dt} &= -\beta.\alpha^{E_f(t)}.S_c(t).\frac{R_c(t)}{N_{chi}} + \gamma.R_c(t)\\
-  \frac{dR_s}{dt} &= p_1.\frac{R_c(t)}{N_{chi}} + p_2.\frac{S_c(t)}{N_{chi}}
+  R_e(t) &= p_R.\frac{R_c(t)}{N_{chi}} + p_S.\frac{S_c(t)}{N_{chi}}
 \end{align*}$$
 
 where:
 
-* $p_1$ is the proportion of gut bacteria of a "R" chicken that are resistant
-* $p_2$ is the proportion of gut bacteria of a "S" chicken that are resistant
+* $p_R$ is the proportion of gut bacteria of a "R" chicken that are resistant
+* $p_S$ is the proportion of gut bacteria of a "S" chicken that are resistant
 * $E_f(t)$ is AMU (0 or 1) in farm f, at week t
 * $\beta$ represents the transmission rate of resistant bacteria from "R" chickens to "S" chickens
 * $\gamma$ represents the clearance rate of resistant bacteria from "R" chickens
@@ -477,4 +477,12 @@ where:
   * If $\alpha = 1$, AMU has no effect on colistin resistance.
   * If $\alpha < 1$, AMU decreases resistance transmission rate between chickens.
   * If $\alpha > 1$, AMU increases resistance transmission rate between chickens.
+
+We also model the observation process. Indeed, the faeces collected during sampling are only those of a number `n_chick_samp` of chickens in the farm.
+
+```{r}
+source("model3_fcts.R")
+```
+
+
 
