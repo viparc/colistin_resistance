@@ -7,3 +7,5 @@ navbar:
       href: index.html
     - text: "Data generation"
       href: make_data.html
+    - text: "Models"
+      href: Model_colistin_resistance.html
