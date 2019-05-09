@@ -79,7 +79,8 @@ n_weeks = 16 # Should not be changed for now
 We load real AMU ViParc data.
 
 ```{r}
-amu_viparc = as.data.frame(read.table("C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/viparc.csv", sep=",", header=T))
+amu_viparc <- readr::read_csv("https://raw.githubusercontent.com/viparc/clires_data/master/data/viparc.csv",
+                          col_types = paste(c("cii", rep("l", 6), rep("d", 45), "lil"), collapse = ""))
 ```
 
 We create a matrix containing binary information on AMU (antimicrobial used / not used) for each week (columns) of the production cycle and for each farm (rows): `ab_expo`.
