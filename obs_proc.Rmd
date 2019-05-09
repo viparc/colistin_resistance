@@ -241,5 +241,5 @@ multiplot(p1,p2,p3,cols=2)
 
 ```
 
-The variability of $Q$ seems to increase with the farm size, which makes sense regarding the fixed sample size (`n_chick_samp = 50`).
+The variability of $Q$ seems to increase with the farm size, which makes sense regarding the fixed sample size (`n_chick_samp = 50`)
 
