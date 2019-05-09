@@ -190,7 +190,7 @@ p1 = plot_Q(S_farm=80, R_farm=20)
 p2 = plot_Q(S_farm=50, R_farm=50)
 p3 = plot_Q(S_farm=20, R_farm=80)
 
-multiplot(p1,p2,p3)
+multiplot(p1,p2,p3, cols=2)
 
 ```
 
@@ -237,7 +237,7 @@ p1 = plot_sd_Q(S_farm=40, R_farm=60)
 p2 = plot_sd_Q(S_farm=400, R_farm=600)
 p3 = plot_sd_Q(S_farm=4000, R_farm=6000)
 
-multiplot(p1,p2,p3)
+multiplot(p1,p2,p3,cols=2)
 
 ```
 

@@ -484,5 +484,27 @@ We also model the observation process. Indeed, the faeces collected during sampl
 source("model3_fcts.R")
 ```
 
+```{r}
+run3 = function(beta, gamma, alpha, k){
+
+  pred = matrix(NA, n_farms, n_weeks)
+  for (farm in 1:n_farms){
+
+    
+
+  }
+
+  if (n_samp == 3){
+    pred_sampl_dates = pred[,c(1,9,16)]
+    colnames(pred_sampl_dates) = colnames(obs) = c("S1","S2","S3")
+  }else if (n_samp == 6){
+    pred_sampl_dates = pred[,seq(1,16,3)]
+    colnames(pred_sampl_dates) = colnames(obs) = c("S1","S2","S3","S4","S5","S6")
+  }
+
+  # return(-sum(dnorm(x=obs, mean=pred_sampl_dates, sd=k, log=T)))
+  return(-sum(dbeta(x=obs, shape1=k, shape2=k*(1.00001-pred_sampl_dates)/(pred_sampl_dates+0.00001), log=T)))
+}
+```
 
 
