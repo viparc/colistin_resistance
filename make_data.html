@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+
+<meta charset="utf-8" />
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+
+
+
+
+<title>Generating the data from the CliRes database (and other data sets)</title>
+
+<script src="site_libs/jquery-1.11.3/jquery.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="site_libs/bootstrap-3.3.5/css/cosmo.min.css" rel="stylesheet" />
+<script src="site_libs/bootstrap-3.3.5/js/bootstrap.min.js"></script>
+<script src="site_libs/bootstrap-3.3.5/shim/html5shiv.min.js"></script>
+<script src="site_libs/bootstrap-3.3.5/shim/respond.min.js"></script>
+<script src="site_libs/navigation-1.1/tabsets.js"></script>
+<link href="site_libs/highlightjs-9.12.0/default.css" rel="stylesheet" />
+<script src="site_libs/highlightjs-9.12.0/highlight.js"></script>
+
+<style type="text/css">code{white-space: pre;}</style>
+<style type="text/css">
+  pre:not([class]) {
+    background-color: white;
+  }
+</style>
+<script type="text/javascript">
+if (window.hljs) {
+  hljs.configure({languages: []});
+  hljs.initHighlightingOnLoad();
+  if (document.readyState && document.readyState === "complete") {
+    window.setTimeout(function() { hljs.initHighlighting(); }, 0);
+  }
+}
+</script>
+
+
+
+<style type="text/css">
+h1 {
+  font-size: 34px;
+}
+h1.title {
+  font-size: 38px;
+}
+h2 {
+  font-size: 30px;
+}
+h3 {
+  font-size: 24px;
+}
+h4 {
+  font-size: 18px;
+}
+h5 {
+  font-size: 16px;
+}
+h6 {
+  font-size: 12px;
+}
+.table th:not([align]) {
+  text-align: left;
+}
+</style>
+
+
+</head>
+
+<body>
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+code {
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+img {
+  max-width:100%;
+  height: auto;
+}
+.tabbed-pane {
+  padding-top: 12px;
+}
+.html-widget {
+  margin-bottom: 20px;
+}
+button.code-folding-btn:focus {
+  outline: none;
+}
+summary {
+  display: list-item;
+}
+</style>
+
+
+<style type="text/css">
+/* padding for bootstrap navbar */
+body {
+  padding-top: 51px;
+  padding-bottom: 40px;
+}
+/* offset scroll position for anchor links (for fixed navbar)  */
+.section h1 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+.section h2 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+.section h3 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+.section h4 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+.section h5 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+.section h6 {
+  padding-top: 56px;
+  margin-top: -56px;
+}
+.dropdown-submenu {
+  position: relative;
+}
+.dropdown-submenu>.dropdown-menu {
+  top: 0;
+  left: 100%;
+  margin-top: -6px;
+  margin-left: -1px;
+  border-radius: 0 6px 6px 6px;
+}
+.dropdown-submenu:hover>.dropdown-menu {
+  display: block;
+}
+.dropdown-submenu>a:after {
+  display: block;
+  content: " ";
+  float: right;
+  width: 0;
+  height: 0;
+  border-color: transparent;
+  border-style: solid;
+  border-width: 5px 0 5px 5px;
+  border-left-color: #cccccc;
+  margin-top: 5px;
+  margin-right: -10px;
+}
+.dropdown-submenu:hover>a:after {
+  border-left-color: #ffffff;
+}
+.dropdown-submenu.pull-left {
+  float: none;
+}
+.dropdown-submenu.pull-left>.dropdown-menu {
+  left: -100%;
+  margin-left: 10px;
+  border-radius: 6px 0 6px 6px;
+}
+</style>
+
+<script>
+// manage active state of menu based on current page
+$(document).ready(function () {
+  // active menu anchor
+  href = window.location.pathname
+  href = href.substr(href.lastIndexOf('/') + 1)
+  if (href === "")
+    href = "index.html";
+  var menuAnchor = $('a[href="' + href + '"]');
+
+  // mark it active
+  menuAnchor.parent().addClass('active');
+
+  // if it's got a parent navbar menu mark it active as well
+  menuAnchor.closest('li.dropdown').addClass('active');
+});
+</script>
+
+<div class="container-fluid main-container">
+
+<!-- tabsets -->
+
+<style type="text/css">
+.tabset-dropdown > .nav-tabs {
+  display: inline-table;
+  max-height: 500px;
+  min-height: 44px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.tabset-dropdown > .nav-tabs > li.active:before {
+  content: "";
+  font-family: 'Glyphicons Halflings';
+  display: inline-block;
+  padding: 10px;
+  border-right: 1px solid #ddd;
+}
+
+.tabset-dropdown > .nav-tabs.nav-tabs-open > li.active:before {
+  content: "&#xe258;";
+  border: none;
+}
+
+.tabset-dropdown > .nav-tabs.nav-tabs-open:before {
+  content: "";
+  font-family: 'Glyphicons Halflings';
+  display: inline-block;
+  padding: 10px;
+  border-right: 1px solid #ddd;
+}
+
+.tabset-dropdown > .nav-tabs > li.active {
+  display: block;
+}
+
+.tabset-dropdown > .nav-tabs > li > a,
+.tabset-dropdown > .nav-tabs > li > a:focus,
+.tabset-dropdown > .nav-tabs > li > a:hover {
+  border: none;
+  display: inline-block;
+  border-radius: 4px;
+}
+
+.tabset-dropdown > .nav-tabs.nav-tabs-open > li {
+  display: block;
+  float: none;
+}
+
+.tabset-dropdown > .nav-tabs > li {
+  display: none;
+}
+</style>
+
+<script>
+$(document).ready(function () {
+  window.buildTabsets("TOC");
+});
+
+$(document).ready(function () {
+  $('.tabset-dropdown > .nav-tabs > li').click(function () {
+    $(this).parent().toggleClass('nav-tabs-open')
+  });
+});
+</script>
+
+<!-- code folding -->
+
+
+
+
+
+<div class="navbar navbar-default  navbar-fixed-top" role="navigation">
+  <div class="container">
+    <div class="navbar-header">
+      <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar">
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+      </button>
+      <a class="navbar-brand" href="index.html">Colistin resistance</a>
+    </div>
+    <div id="navbar" class="navbar-collapse collapse">
+      <ul class="nav navbar-nav">
+        <li>
+  <a href="index.html">Overview</a>
+</li>
+<li>
+  <a href="make_data.html">Data generation</a>
+</li>
+      </ul>
+      <ul class="nav navbar-nav navbar-right">
+        
+      </ul>
+    </div><!--/.nav-collapse -->
+  </div><!--/.container -->
+</div><!--/.navbar -->
+
+<div class="fluid-row" id="header">
+
+
+
+<h1 class="title toc-ignore">Generating the data from the CliRes database (and other data sets)</h1>
+
+</div>
+
+<div id="TOC">
+<ul>
+<li><a href="#packages">Packages</a></li>
+<li><a href="#utilitary-funtion">Utilitary funtion</a></li>
+<li><a href="#additional-data">Additional data</a><ul>
+<li><a href="#iu-to-mg-conversion">IU to mg conversion</a></li>
+<li><a href="#age-weight-relationship">Age-weight relationship</a></li>
+</ul></li>
+<li><a href="#viparc-data">ViParc data</a><ul>
+<li><a href="#drug-codes-from-general-information-data">Drug codes from general information data</a></li>
+<li><a href="#the-surveillance-data">The surveillance data</a></li>
+</ul></li>
+<li><a href="#merging-into-one-single-data-set">Merging into one single data set</a></li>
+</ul>
+</div>
+
+<!--
+IMAGES:
+Insert them with: ![alt text](image.png)
+You can also resize them if needed: convert image.png -resize 50% image.png
+If you want to center the image, go through HTML code:
+<div style="text-align:center"><img src ="image.png"/></div>
+-->
+<div id="packages" class="section level2">
+<h2>Packages</h2>
+<p>Installing the required packages:</p>
+<pre class="r"><code>&gt; required &lt;- c(&quot;dplyr&quot;, &quot;grDevices&quot;, &quot;magrittr&quot;, &quot;mgcv&quot;, &quot;purrr&quot;, &quot;readxl&quot;, &quot;tibble&quot;, &quot;tidyr&quot;)
+&gt; to_install &lt;- which(! required %in% row.names(installed.packages()))
+&gt; if (length(to_install) &gt; 0) install.packages(to_install)</code></pre>
+<p>Loading <code>magrittr</code>:</p>
+<pre class="r"><code>&gt; library(magrittr)</code></pre>
+</div>
+<div id="utilitary-funtion" class="section level2">
+<h2>Utilitary funtion</h2>
+<pre class="r"><code>&gt; lapply2 &lt;- function(X, FUN, ...) setNames(lapply(X, FUN, ...), X)</code></pre>
+</div>
+<div id="additional-data" class="section level2">
+<h2>Additional data</h2>
+<div id="iu-to-mg-conversion" class="section level3">
+<h3>IU to mg conversion</h3>
+<p>The <a href="https://www.ema.europa.eu/en/veterinary-regulatory/overview/antimicrobial-resistance/european-surveillance-veterinary-antimicrobial-consumption-esvac">ESVAC</a> conversion factors are available from the table 2 of page 62 of the <a href="http://www.oie.int">OIE</a> <a href="http://www.oie.int/fileadmin/Home/fr/Our_scientific_expertise/docs/pdf/AMR/Survey_on_monitoring_antimicrobial_agents_Dec2016.pdf">report</a>. A copy-paste of this table without headers is available <a href="https://raw.githubusercontent.com/viparc/prophylactic/master/data/esvac.txt">here</a>. We can read this file and format it to compute the following IU-to-mg convertion vector:</p>
+<pre class="r"><code>&gt; if (! file.exists(&quot;esvac.txt&quot;))
++   download.file(&quot;https://raw.githubusercontent.com/viparc/prophylactic/master/data/esvac.txt&quot;, &quot;esvac.txt&quot;)</code></pre>
+<pre class="r"><code>&gt; esvac &lt;- readLines(&quot;esvac.txt&quot;) %&gt;% 
++   sub(&quot;^#.*&quot;, &quot;&quot;, .) %&gt;% 
++   sub(&quot; *&quot;, &quot;&quot;, .) %&gt;% 
++   {.[. != &quot;&quot;]} %&gt;% 
++   matrix(ncol = 4, byrow = TRUE) %&gt;% 
++   as.data.frame(stringsAsFactors = FALSE) %&gt;% 
++   setNames(c(&quot;ab_vet_med&quot;, &quot;ab_oie&quot;, &quot;IU.mg&quot;, &quot;mg.IU&quot;)) %&gt;% 
++   dplyr::filter(!grepl(&quot;methane&quot;, ab_vet_med)) %&gt;% 
++   dplyr::transmute(ab_oie = sub(&quot; .*$&quot;, &quot;&quot;, tolower(ab_oie)),
++                    mg.IU  = as.numeric(mg.IU)) %&gt;% 
++   dplyr::bind_rows(data.frame(ab_oie = &quot;josamycin&quot;,
++                               mg.IU  = 0.001, stringsAsFactors = FALSE)) %$%
++   setNames(mg.IU, ab_oie)</code></pre>
+<p>Note that we got rid off one of the colistin data and that we manually added the data for josamycin that was absent from the table.</p>
+</div>
+<div id="age-weight-relationship" class="section level3">
+<h3>Age-weight relationship</h3>
+<p>Data on chicken weights as a function of age were collected for a previous study. The data are <a href="https://www.dropbox.com/s/mbbejp9d8an1l4h/Supplementary_Data_Frontiers.xlsx?dl=0">here</a>. We will use these data for the current study:</p>
+<pre class="r"><code>&gt; age_weight_data &lt;- &quot;https://www.dropbox.com/s/mbbejp9d8an1l4h/Supplementary_Data_Frontiers.xlsx?dl=0&quot;
+&gt; if (! file.exists(&quot;age_weight.xlsx&quot;))
++   download.file(sub(&quot;dl=0&quot;, &quot;raw=1&quot;, age_weight_data), &quot;age_weight.xlsx&quot;)</code></pre>
+<pre class="r"><code>&gt; age_weight &lt;- readxl::read_excel(&quot;age_weight.xlsx&quot;) %&gt;% 
++   tidyr::gather(&quot;week&quot;, &quot;weight.kg&quot;, -FlockID, -Chicken) %&gt;% 
++   na.exclude() %&gt;% 
++   dplyr::mutate(week = sub(&quot;Week &quot;, &quot;&quot;, week)) %&gt;% 
++   dplyr::mutate_at(c(&quot;FlockID&quot;, &quot;Chicken&quot;, &quot;week&quot;), as.integer)</code></pre>
+</div>
+</div>
+<div id="viparc-data" class="section level2">
+<h2>ViParc data</h2>
+<p>The ViParc data are in 2 excel files, each with many tabs. One of these files contains general information and the one contains the surveillance data:</p>
+<pre class="r"><code>&gt; general_data &lt;- &quot;https://www.dropbox.com/s/gt6k1m781537vd2/16-4-2019-_18ZN_Category_V1_Data.xls?dl=0&quot;
+&gt; surveillance_data &lt;- &quot;https://www.dropbox.com/s/7gjt77eltpm4ygw/16-4-2019-_18ZN_V1_Data.xls?dl=0&quot;</code></pre>
+<p>Let’s download the excel files:</p>
+<pre class="r"><code>&gt; if (! file.exists(&quot;general_data.xls&quot;))
++   download.file(sub(&quot;dl=0&quot;, &quot;raw=1&quot;, general_data), &quot;general_data.xls&quot;)
+&gt; if (! file.exists(&quot;surveillance_data.xls&quot;))
++   download.file(sub(&quot;dl=0&quot;, &quot;raw=1&quot;, surveillance_data), &quot;surveillance_data.xls&quot;)</code></pre>
+<p>For antimicrobial, disease and chicken data in the surveillance file, we need the following pairs of tabs respectively, that we have to merge:</p>
+<pre class="r"><code>&gt; antimicrobial &lt;- c(&quot;ANTIMICROBIAL&quot;, &quot;ANTIMICROBIAL_GridEvent&quot;)
+&gt; disease &lt;- c(&quot;DISEASE&quot;, &quot;DISEASE_GridEvent&quot;)
+&gt; chicken &lt;- c(&quot;MID_INOUT&quot;, &quot;MID_INOUT_GridEvent&quot;)</code></pre>
+<div id="drug-codes-from-general-information-data" class="section level3">
+<h3>Drug codes from general information data</h3>
+<p>Here we’ll merge with the <code>esvac</code> dataframe that we generated above.</p>
+<pre class="r"><code>&gt; drug_codes &lt;- c(&quot;ANTIMICROBIAL&quot;, &quot;ANTIMICROBIAL_GridAnti&quot;) %&gt;% 
++   lapply(readxl::read_excel, path = &quot;general_data.xls&quot;) %&gt;% 
++   purrr::invoke(dplyr::right_join, ., &quot;ANTIMICROBIAL_SEQ&quot;) %&gt;% 
++   dplyr::select(CODE, ANTINAME1, CONCENTRATION, GRIDUNIT, GRIDPACK, GRIDPACKUNIT) %&gt;%
++   dplyr::filter(! ANTINAME1 %in% c(&quot;alicin&quot;, &quot;axit oxolinic&quot;, &quot;iodo-hydroxyquinoline&quot;, &quot;metronidazol&quot;, &quot;nystatin&quot;)) %&gt;% 
++   dplyr::mutate(ANTINAME1     = dplyr::recode(ANTINAME1, sunfadimethoxine  = &quot;sulfadimethoxine&quot;,
++                                                          sunphamethoxazole = &quot;sulphamethoxazole&quot;),
++                 GRIDUNIT      = dplyr::na_if(GRIDUNIT, &quot;NA&quot;),
++                 GRIDUNIT      = dplyr::na_if(GRIDUNIT, &quot;na&quot;),
++                 GRIDUNIT      = dplyr::recode(GRIDUNIT, UI = &quot;IU&quot;, mg = &quot;MG&quot;),
++                 GRIDPACKUNIT  = dplyr::na_if(GRIDPACKUNIT, &quot;na&quot;),
++                 GRIDPACKUNIT  = dplyr::na_if(GRIDPACKUNIT, &quot;VI&quot;),
++                 GRIDPACKUNIT  = dplyr::recode(GRIDPACKUNIT, g  = &quot;G&quot;, ml = &quot;G&quot;, ML = &quot;G&quot;),
++                 CONCENTRATION = dplyr::na_if(CONCENTRATION, &quot;NA&quot;),
++                 CONCENTRATION = dplyr::na_if(CONCENTRATION, &quot;na&quot;),
++                 CONCENTRATION = dplyr::recode(CONCENTRATION, S = &quot;500&quot;), # this will ultimately be corrected in CliRes
++                 CONCENTRATION = as.numeric(CONCENTRATION),
++                 CONCENTRATION = ifelse(GRIDUNIT == &quot;IU&quot;, CONCENTRATION * esvac[ANTINAME1], CONCENTRATION),
++                 GRIDUNIT      = ifelse(GRIDUNIT == &quot;IU&quot;, &quot;MG&quot;, GRIDUNIT), # HAS TO BE HERE!!!
++                 CONCENTRATION = ifelse(GRIDUNIT == &quot;MG&quot;, CONCENTRATION / 1000, CONCENTRATION),
++                 GRIDUNIT      = ifelse(GRIDUNIT == &quot;MG&quot;, &quot;G&quot;, GRIDUNIT), # HAS TO BE HERE!!!
++                 GRIDPACK      = dplyr::na_if(GRIDPACK, &quot;na&quot;),
++                 GRIDPACK      = as.numeric(GRIDPACK),
++                 GRIDPACK      = ifelse(GRIDPACKUNIT == &quot;KG&quot;, 1000 * GRIDPACK, GRIDPACK),
++                 GRIDPACKUNIT  = ifelse(GRIDPACKUNIT == &quot;KG&quot;, &quot;G&quot;, GRIDPACKUNIT), # HAS TO BE HERE!!! 
++                 proportion    = CONCENTRATION / GRIDPACK)</code></pre>
+</div>
+<div id="the-surveillance-data" class="section level3">
+<h3>The surveillance data</h3>
+<pre class="r"><code>&gt; surveillance &lt;- c(antimicrobial, disease, chicken, &quot;SAMPLE&quot;) %&gt;%
++   lapply2(readxl::read_excel, path = &quot;surveillance_data.xls&quot;)</code></pre>
+<div id="sampling-dates" class="section level4">
+<h4>Sampling dates</h4>
+<pre class="r"><code>&gt; samplesdata &lt;- surveillance$SAMPLE %&gt;% 
++   dplyr::select(USUBJID, FLOCKSEQUENCE, SAMPLINGDATE, SAMPLINGVISIT) %&gt;% 
++   unique()</code></pre>
+<p>Here we have to break the pipeline because we need to use the <code>samplesdata</code> at two distincts points in the section that follows:</p>
+<pre class="r"><code>&gt; samples &lt;- samplesdata %&gt;%
++   dplyr::filter(SAMPLINGVISIT == &quot;S&quot;) %&gt;%
++   dplyr::select(-SAMPLINGVISIT) %&gt;%
++   dplyr::rename(start = SAMPLINGDATE) %&gt;%
++   dplyr::right_join(samplesdata, c(&quot;USUBJID&quot;, &quot;FLOCKSEQUENCE&quot;)) %&gt;%
++   dplyr::mutate(WEEK     = as.numeric(floor((SAMPLINGDATE - start) / (60 * 60 * 24 * 7)) + 1),
++                 sampling = TRUE) %&gt;% 
++   dplyr::select(-start, -SAMPLINGDATE, -SAMPLINGVISIT)</code></pre>
+</div>
+<div id="clinical-signs" class="section level4">
+<h4>Clinical signs</h4>
+<pre class="r"><code>&gt; raw_symptoms &lt;- surveillance[disease] %&gt;% 
++   unname() %&gt;% 
++   purrr::invoke(dplyr::left_join, ., c(&quot;USUBJID&quot;, &quot;DISEASE_SEQ&quot;)) %&gt;%
++   dplyr::select(USUBJID, FLOCKSEQUENCE, WEEK, RESPIRATORY, DIARRHOEA, CNS, MALAISE, LEGLESIONS, SUDDENDEATH)</code></pre>
+<p>There are two corrections that cannot be done in CliRes and that we have to do here. We also have to break the pipeline because we uses the <code>raw_symptoms</code> dataframe that we just created at two distinct points in the section that follow:</p>
+<pre class="r"><code>&gt; symptoms &lt;- raw_symptoms %&gt;% 
++ # correction 1: 2 weeks 8 and no week 9 for cycle 2 of farm 8. These 2 weeks are identical
++   dplyr::filter(USUBJID == &quot;75-008&quot;, FLOCKSEQUENCE == &quot;02&quot;, WEEK == 8) %&gt;% 
++   dplyr::mutate(WEEK = 8:9) %&gt;%
++   dplyr::bind_rows(dplyr::filter(raw_symptoms, !(USUBJID == &quot;75-008&quot; &amp; FLOCKSEQUENCE == &quot;02&quot; &amp; WEEK == 8))) %&gt;% 
++ # correction 2: week 19 instead of 10 for cycle 6 of farm 21:
++   dplyr::mutate(WEEK = ifelse(USUBJID == &quot;75-021&quot; &amp; FLOCKSEQUENCE == &quot;06&quot; &amp; WEEK == 19, 10, WEEK))</code></pre>
+</div>
+<div id="antimicrobial-usage" class="section level4">
+<h4>Antimicrobial usage</h4>
+<p>Here we’ll merge with the <code>drug_codes</code> dataframe that we generated above.</p>
+<pre class="r"><code>&gt; amu &lt;- surveillance[antimicrobial] %&gt;% 
++   unname() %&gt;% 
++   purrr::invoke(dplyr::left_join, ., c(&quot;USUBJID&quot;, &quot;ANTIMICROBIAL_SEQ&quot;)) %&gt;% 
++   dplyr::select(USUBJID, FLOCKSEQUENCE, WEEKNO, CODE, AMOUTUSED, PACKAGEUNIT) %&gt;%
++   na.exclude() %&gt;% ### DO WE NEED THIS???
++   dplyr::mutate(PACKAGEUNIT = dplyr::na_if(PACKAGEUNIT, &quot;TAB&quot;)) %&gt;% 
++   dplyr::left_join(drug_codes, &quot;CODE&quot;) %&gt;%
++   tidyr::replace_na(list(ANTINAME1 = &quot;unknown&quot;)) %&gt;% # because some antibiotic names are unknown
++   dplyr::mutate(presence    = 1,
++                 antibiotic  = proportion * AMOUTUSED,
++                 antibiotic2 = antibiotic,
++                 antiname2   = paste0(ANTINAME1, &quot;_g&quot;),
++                 antiname3   = paste0(ANTINAME1, &quot;_g.kg&quot;),
++                 ANTINAME1   = paste0(ANTINAME1, &quot;_use&quot;)) %&gt;%
++   dplyr::select(USUBJID, FLOCKSEQUENCE, WEEKNO, ANTINAME1, presence, antiname2, antibiotic, antiname3, antibiotic2) %&gt;% 
++   tibble::rowid_to_column() %&gt;% # spread require unique row identifiers
++   tidyr::spread(ANTINAME1, presence) %&gt;%
++   tidyr::spread(antiname2, antibiotic) %&gt;%
++   tidyr::spread(antiname3, antibiotic2) %&gt;%
++   dplyr::select(-rowid) %&gt;% # we don&#39;t need rowid anymore
++   replace(is.na(.), 0) %&gt;%
++   dplyr::group_by(USUBJID, FLOCKSEQUENCE, WEEKNO) %&gt;%
++   dplyr::summarise_all(~sum(.)) %&gt;%
++   dplyr::mutate_at(dplyr::vars(dplyr::ends_with(&quot;_use&quot;, FALSE)), function(x) x &gt; 0)</code></pre>
+</div>
+<div id="chicken-data" class="section level4">
+<h4>Chicken data</h4>
+<pre class="r"><code>&gt; chickdata &lt;- surveillance[chicken] %&gt;% 
++   unname() %&gt;% 
++   purrr::invoke(dplyr::left_join, ., c(&quot;USUBJID&quot;, &quot;MID_INOUT_SEQ&quot;)) %&gt;% 
++   dplyr::select(USUBJID, FLOCKSEQUENCE, WEEK, CHICKENTOTAL) %&gt;% 
++   unique() %&gt;% 
++   dplyr::mutate_at(&quot;CHICKENTOTAL&quot;, as.integer)</code></pre>
+<p>Here we have to break the pipeline because <code>chickdata</code> is used at two distinct points in the part below:</p>
+<pre class="r"><code>&gt; chickenn &lt;- chickdata %&gt;%
++   dplyr::group_by(USUBJID, FLOCKSEQUENCE) %&gt;%
++   dplyr::summarize(completed = min(CHICKENTOTAL) &lt; 1) %&gt;%
++   dplyr::ungroup() %&gt;% 
++   dplyr::right_join(chickdata, c(&quot;USUBJID&quot;, &quot;FLOCKSEQUENCE&quot;))</code></pre>
+<p>Now, we will extrapolate the weight data in order to cover the age range of the <code>symptoms</code> dataframe. First let’s extract the vector of weeks from <code>symptoms</code>:</p>
+<pre class="r"><code>&gt; # weeks &lt;- as.integer(1:max(symptoms$WEEK))
+&gt; weeks &lt;- 1:max(symptoms$WEEK)</code></pre>
+<p>Then, let’s do the extrapolation, using a GAM with a gamma distribution of errors and a log link:</p>
+<pre class="r"><code>&gt; chickendata &lt;- age_weight %&gt;% 
++   mgcv::gam(weight.kg ~ s(week), Gamma(link = log), .) %&gt;% 
++   mgcv::predict.gam(data.frame(week = weeks), &quot;response&quot;) %&gt;% 
++   list(weeks) %&gt;% 
++   as.data.frame() %&gt;% 
++   setNames(c(&quot;individual_weight_kg&quot;, &quot;WEEK&quot;)) %&gt;% 
++   dplyr::right_join(chickenn, &quot;WEEK&quot;) %&gt;% 
++   dplyr::mutate(farm_weight_kg = individual_weight_kg * CHICKENTOTAL)</code></pre>
+</div>
+</div>
+</div>
+<div id="merging-into-one-single-data-set" class="section level2">
+<h2>Merging into one single data set</h2>
+<p>Let’s now merge the <code>symptoms</code>, <code>samples</code>, <code>amu</code> and <code>chickendata</code> dataframes that we created above. For that, we will use the <code>symptoms</code> dataframe as the reference. It means that we want to check that</p>
+<ul>
+<li>there is no missing weeks in the <code>symptoms</code> dataframe.</li>
+<li>there is no weeks in <code>amu</code> or <code>chickendata</code> that are not in <code>symptoms</code></li>
+</ul>
+<p>Note that, for now, we don’t check <code>samples</code> because, as a matter of fact there are some issues here, as outlined below.</p>
+<p>Checking that there is no missing weeks in <code>symptoms</code>:</p>
+<pre class="r"><code>&gt; symptoms %&gt;%
++   dplyr::group_by(USUBJID, FLOCKSEQUENCE) %&gt;%
++   dplyr::arrange(WEEK) %&gt;%
++   dplyr::summarise(a = length(unique(diff(WEEK)))) %&gt;%
++   dplyr::ungroup() %&gt;%
++   dplyr::filter(a &gt; 1) %&gt;% 
++   nrow() %&gt;% 
++   `&lt;`(1)
+[1] TRUE</code></pre>
+<p>Checking that there is no week defined in <code>amu</code> but not in <code>symptoms</code>:</p>
+<pre class="r"><code>&gt; dplyr::anti_join(amu, symptoms, c(&quot;USUBJID&quot;, &quot;FLOCKSEQUENCE&quot;, &quot;WEEKNO&quot; = &quot;WEEK&quot;)) %&gt;% 
++   nrow() %&gt;% 
++   `&lt;`(1)
+[1] TRUE</code></pre>
+<p>Checking that there is no week defined in <code>chickenn</code> but not in <code>viparc</code>:</p>
+<pre class="r"><code>&gt; dplyr::anti_join(chickendata, symptoms, c(&quot;USUBJID&quot;, &quot;FLOCKSEQUENCE&quot;, &quot;WEEK&quot;)) %&gt;% 
++     nrow() %&gt;% 
++   `&lt;`(1)
+[1] TRUE</code></pre>
+<p>Checking that there is no week defined in <code>chickenn</code> but not in <code>viparc</code>:</p>
+<pre class="r"><code>&gt; dplyr::anti_join(samples, symptoms, c(&quot;USUBJID&quot;, &quot;FLOCKSEQUENCE&quot;, &quot;WEEK&quot;)) %&gt;% 
++     nrow() %&gt;% 
++   `&lt;`(1)
+[1] FALSE</code></pre>
+<p>We are ready for the merging and writing to disk. Note that the <code>amu</code> dataframe contains only weeks for which there was some AMU. For that reason, we will have to perform some <code>NA</code> replacement after the merging of <code>symptoms</code> and <code>amu</code>.</p>
+<pre class="r"><code>&gt; viparc &lt;- symptoms %&gt;% 
++   dplyr::left_join(amu, c(&quot;USUBJID&quot;, &quot;FLOCKSEQUENCE&quot;, &quot;WEEK&quot; = &quot;WEEKNO&quot;)) %&gt;% 
++   dplyr::mutate_at(dplyr::vars(dplyr::ends_with(&quot;_use&quot;)), . %&gt;% ifelse(is.na(.), FALSE, .)) %&gt;% 
++   dplyr::mutate_at(dplyr::vars(dplyr::ends_with(&quot;_g&quot;)), . %&gt;% ifelse(is.na(.), 0, .)) %&gt;% 
++   dplyr::mutate_at(dplyr::vars(dplyr::ends_with(&quot;_g.kg&quot;)), . %&gt;% ifelse(is.na(.), 0, .)) %&gt;% 
++   dplyr::left_join(chickendata, c(&quot;USUBJID&quot;, &quot;FLOCKSEQUENCE&quot;, &quot;WEEK&quot;)) %&gt;% 
++   dplyr::mutate_at(dplyr::vars(dplyr::ends_with(&quot;_g.kg&quot;)), ~ . / farm_weight_kg) %&gt;% 
++   dplyr::left_join(samples, c(&quot;USUBJID&quot;, &quot;FLOCKSEQUENCE&quot;, &quot;WEEK&quot;)) %&gt;% 
++   dplyr::mutate_at(dplyr::vars(FLOCKSEQUENCE, WEEK), as.integer) %&gt;% 
++   dplyr::arrange(USUBJID, FLOCKSEQUENCE, WEEK)</code></pre>
+<p>Some of the completed flocks do not have 3 samplings:</p>
+<pre class="r"><code>&gt; (tmp &lt;- viparc %&gt;% 
++   dplyr::select(USUBJID, FLOCKSEQUENCE, completed, sampling) %&gt;% 
++   dplyr::group_by(USUBJID, FLOCKSEQUENCE) %&gt;%
++   dplyr::summarise(completed = mean(completed), sampling = sum(sampling, na.rm = T)) %&gt;% 
++   dplyr::ungroup() %&gt;% 
++   dplyr::filter(completed &gt; 0, sampling &lt; 3))
+# A tibble: 31 x 4
+   USUBJID FLOCKSEQUENCE completed sampling
+   &lt;chr&gt;           &lt;int&gt;     &lt;dbl&gt;    &lt;int&gt;
+ 1 75-003              1         1        2
+ 2 75-012              1         1        2
+ 3 75-012              4         1        2
+ 4 75-015              2         1        2
+ 5 75-016              2         1        2
+ 6 75-019              2         1        0
+ 7 75-022              2         1        2
+ 8 75-022              4         1        2
+ 9 75-029              3         1        0
+10 75-029              4         1        2
+# … with 21 more rows</code></pre>
+<p>These are likely to be cycles shorter than expected, as suggested by the following figure:</p>
+<pre class="r"><code>&gt; hist2 &lt;- function(x, ...) hist(x, breaks = 0:30, ...)
+&gt; 
+&gt; viparc %&gt;%
++   dplyr::group_by(USUBJID, FLOCKSEQUENCE) %&gt;%
++   dplyr::tally() %&gt;%
++   dplyr::ungroup() %$%
++   hist2(n, col = &quot;grey&quot;, xlab = &quot;duration (weeks)&quot;, ylab = &quot;number of flocks&quot;, main = NA)
+&gt; 
+&gt; tmp %&gt;% 
++   dplyr::filter(sampling == 1) %$% 
++   purrr::map2(USUBJID,
++               FLOCKSEQUENCE,
++               function(x, y)
++                 dplyr::filter(viparc, USUBJID == x, FLOCKSEQUENCE == y) %&gt;%
++                 nrow()
++   ) %&gt;% 
++   unlist() %&gt;% 
++   hist2(col = adjustcolor(&quot;red&quot;, .5), add = TRUE)
+&gt; 
+&gt; tmp %&gt;% 
++   dplyr::filter(sampling == 2) %$% 
++   purrr::map2(USUBJID,
++               FLOCKSEQUENCE,
++               function(x, y)
++                 dplyr::filter(viparc, USUBJID == x, FLOCKSEQUENCE == y) %&gt;%
++                 nrow()
++   ) %&gt;% 
++   unlist() %&gt;% 
++   hist2(col = adjustcolor(&quot;blue&quot;, .5), add = TRUE)
+&gt; 
+&gt; legend(&quot;left&quot;, c(&quot;1 sampling only&quot;, &quot;2 samplings only&quot;), fill = adjustcolor(c(&quot;red&quot;, &quot;blue&quot;), .5), bty = &quot;n&quot;)</code></pre>
+<p><img src="make_data_files/figure-html/unnamed-chunk-29-1.png" width="407.736" style="display: block; margin: auto;" /></p>
+<p>Writing to disk anyway:</p>
+<pre class="r"><code>&gt; if (!dir.exists(&quot;data&quot;)) dir.create(&quot;data&quot;)
+&gt; write.csv(viparc, &quot;data/viparc.csv&quot;, FALSE, row.names = FALSE)</code></pre>
+</div>
+
+
+
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+function bootstrapStylePandocTables() {
+  $('tr.header').parent('thead').parent('table').addClass('table table-condensed');
+}
+$(document).ready(function () {
+  bootstrapStylePandocTables();
+});
+
+
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>
