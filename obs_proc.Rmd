@@ -219,7 +219,7 @@ plot_sd_Q = function(S_farm, R_farm, val_pS=seq(0,1,0.05), val_pR=seq(0,1,0.05),
   }
 
   p = ggplot(data = sens_an, aes(x=val_pS, y=val_pR))
-  p = p + ggtitle(paste0("Value of Q with S=",S_farm," and R=",R_farm))
+  p = p + ggtitle(paste0("SD of Q with S=",S_farm," and R=",R_farm))
   p = p + xlab("pS")
   p = p + ylab("pR")
   p = p + geom_tile(aes(fill = val_proxy))

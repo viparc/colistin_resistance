@@ -1,21 +1,5 @@
 # Model 3 functions
 
-eq_mod_3=function(t, state, param){
-  
-  beta = param[[1]]
-  gamma = param[[2]]
-  alpha = param[[3]]
-  ab_expo_farm = param[[4]]
-  
-  S = state[1]
-  R = state[2]
-  
-  dS = -(beta * (alpha^ab_expo_farm[t]) * S * R /(S+R)) + gamma * R
-  dR = (beta * (alpha^ab_expo_farm[t]) * S * R /(S+R)) - gamma * R
-  
-  return(list(c(dS, dR)))
-}
-
 obs_process=function(state, param){
   n_chick_samp = param[[1]] # Number of individuals whose feces are collected
   pS = param[[2]] # Proportion of resistant bacteria in "S" chickens
@@ -33,21 +17,63 @@ obs_process=function(state, param){
   return(Re)
 }
 
-pred_mod_3 = function(farm, param){
+
+library(adaptivetau)
+
+mod_transitions <- list(
+  c(S = -1, R = 1), # infection by resistant bacteria
+  c(R = -1, S = 1), # recovery from resistant bacteria
+  c(S = -1, R = 0), # death of "S" individuals
+  c(R = -1, S = 0) # death of "R" individuals
+)
+
+mod_rateFunc <- function(state, parameters, t) {
+  
+  beta <- parameters[[1]]
+  gamma <- parameters[[2]]
+  alpha <- parameters[[3]]
+  nu <- parameters[[4]]
+  ab_expo_farm <- parameters[[5]]
+  
+  S <- state["S"] 
+  R <- state["R"] 
+  N <- S + R
+  
+  t_day = max(ceiling(t), 1)
+  
+  return(c(
+    (alpha ^ ab_expo_farm[t_day]) * beta * S * R / N,
+    gamma * R,
+    nu * S,
+    nu * R
+  ))
+}
+
+
+pred_mod_3 = function(this_farm_size, ab_expo_farm, param){
   beta = param[[1]]
   gamma = param[[2]]
   alpha = param[[3]]
-  ab_expo_farm = param[[4]]
-  pS = param[[5]] # Proportion of resistant bacteria in "S" chickens
-  pR = param[[6]] # Proportion of resistant bacteria in "R" chickens
+  nu = param[[4]]
+  eta = param[[5]]
+  pS = param[[6]] # Proportion of resistant bacteria in "S" chickens
+  pR = param[[7]] # Proportion of resistant bacteria in "R" chickens
   
-  init_prev = round(obs[farm, 1]*200)
-  pred_indiv = ode(c(200-init_prev, chick_prev), 1:n_weeks, eq_mod_3, list(beta, gamma, alpha, ab_expo[farm,]))
+  init_prev = round(eta*this_farm_size)
   
+  pred_ev = data.frame(ssa.adaptivetau(init.values = c(S = this_farm_size-init_prev, R = init_prev),
+                               transitions = mod_transitions,
+                               rateFunc = mod_rateFunc,
+                               params = list(beta, gamma, alpha, nu, ab_expo[farm,]),
+                               tf = n_weeks))
+  
+  pred_S = approx(x = pred_ev$time, y = pred_ev$S, xout = 1:n_weeks, method = "constant")
+  pred_R = approx(x = pred_ev$time, y = pred_ev$R, xout = 1:n_weeks, method = "constant")
+
   # Observation process:
   pred = rep(NA, n_weeks)
   for(t in 1:n_weeks){
-    pred[t] = obs_process(pred_indiv[t,2:3], list(50, 0, 1))
+    pred[t] = obs_process(c(pred_S$y[t], pred_R$y[t]), list(50, 0, 1))
   }
   
   return(pred)

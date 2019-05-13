@@ -461,9 +461,9 @@ $N_{chi} = S_c(t) + R_c(t)$ is the number of chickens in farm f.
 We also introduce $R_s(t)$ the proportion of resistant bacteria in the pooled faeces sample collected in farm f at time t.
 
 $$\begin{align*}
-  \frac{dR_c}{dt} &= \beta.\alpha^{E_f(t)}.S_c(t).\frac{R_c(t)}{N_{chi}} - \gamma.Rc(t)\\
-  \frac{dS_c}{dt} &= -\beta.\alpha^{E_f(t)}.S_c(t).\frac{R_c(t)}{N_{chi}} + \gamma.R_c(t)\\
-  R_e(t) &= p_R.\frac{R_c(t)}{N_{chi}} + p_S.\frac{S_c(t)}{N_{chi}}
+  \frac{dR_c}{dt} &= \beta.\alpha^{E_f(t)}.S_c(t).\frac{R_c(t)}{S_c(t)+R_c(t)} - \gamma.R_c(t) - \nu.R_c(t)\\
+  \frac{dS_c}{dt} &= -\beta.\alpha^{E_f(t)}.S_c(t).\frac{R_c(t)}{S_c(t)+R_c(t)} + \gamma.R_c(t)  - \nu.S_c(t)\\
+  R_e(t) &= p_R.\frac{R_c(t)}{S_c(t)+R_c(t)} + p_S.\frac{S_c(t)}{S_c(t)+R_c(t)}
 \end{align*}$$
 
 where:
@@ -477,11 +477,100 @@ where:
   * If $\alpha = 1$, AMU has no effect on colistin resistance.
   * If $\alpha < 1$, AMU decreases resistance transmission rate between chickens.
   * If $\alpha > 1$, AMU increases resistance transmission rate between chickens.
+* $\nu$ represents the weekly mortality rate in chickens
 
 We also model the observation process. Indeed, the faeces collected during sampling are only those of a number `n_chick_samp` of chickens in the farm.
 
 ```{r}
-source("model3_fcts.R")
+obs_process=function(state, param){
+  n_chick_samp = param[[1]] # Number of individuals whose feces are collected
+  pS = param[[2]] # Proportion of resistant bacteria in "S" chickens
+  pR = param[[3]] # Proportion of resistant bacteria in "R" chickens
+  
+  S = state[1]
+  R = state[2]
+  
+  n_samp_R = sum(sample(c(rep(1, R), rep(0, S)), n_chick_samp, replace=F)) # Number of "R" individuals whose feces are collected
+  n_samp_S = n_chick_samp - n_samp_R # Number of "S" individuals whose feces are collected
+  
+  # Re: Proportion of resistant bacteria in the pooled sample collected
+  Re = pS * n_samp_S/(n_samp_S + n_samp_R) + pR * n_samp_R/(n_samp_S + n_samp_R)
+  
+  return(Re)
+}
+
+library(adaptivetau)
+
+mod_transitions <- list(
+  c(S = -1, R = 1), # infection by resistant bacteria
+  c(R = -1, S = 1), # recovery from resistant bacteria
+  c(S = -1, R = 0), # death of "S" individuals
+  c(R = -1, S = 0) # death of "R" individuals
+)
+
+mod_rateFunc <- function(state, parameters, t) {
+  
+  beta <- parameters[[1]]
+  gamma <- parameters[[2]]
+  alpha <- parameters[[3]]
+  nu <- parameters[[4]]
+  ab_expo_f <- parameters[[5]]
+  
+  S <- state["S"]
+  R <- state["R"]
+  N <- S + R
+  
+  t_day = max(ceiling(t), 1)
+  
+  return(c(
+    (alpha ^ ab_expo_f[t_day]) * beta * S * R / N,
+    gamma * R,
+    nu * S,
+    nu * R
+  ))
+}
+
+pred_mod_3 = function(this_farm_size, ab_expo_farm, param){
+  beta = param[[1]]
+  gamma = param[[2]]
+  alpha = param[[3]]
+  nu = param[[4]]
+  eta = param[[5]]
+  pS = param[[6]] # Proportion of resistant bacteria in "S" chickens
+  pR = param[[7]] # Proportion of resistant bacteria in "R" chickens
+  
+  init_prev = round(eta*this_farm_size)
+  
+  pred_ev = data.frame(ssa.adaptivetau(init.values = c(S = this_farm_size-init_prev, R = init_prev),
+                               transitions = mod_transitions,
+                               rateFunc = mod_rateFunc,
+                               params = list(beta, gamma, alpha, nu, ab_expo_farm),
+                               tf = n_weeks))
+  
+  pred_S = approx(x = pred_ev$time, y = pred_ev$S, xout = 1:n_weeks, method = "constant")
+  pred_R = approx(x = pred_ev$time, y = pred_ev$R, xout = 1:n_weeks, method = "constant")
+
+  # Observation process:
+  if (n_samp == 3){
+    
+    pred_count = rep(NA, 3)
+    pred_count[1] = obs_process(c(pred_S$y[1], pred_R$y[1]), list(50, 0.05, 0.95))
+    pred_count[2] = obs_process(c(pred_S$y[9], pred_R$y[9]), list(50, 0.05, 0.95))
+    pred_count[3] = obs_process(c(pred_S$y[16], pred_R$y[16]), list(50, 0.05, 0.95))
+
+  }else if (n_samp == 6){
+    
+    pred_count = rep(NA, 6)
+    pred_count[1] = obs_process(c(pred_S$y[1], pred_R$y[1]), list(50, 0.05, 0.95))
+    pred_count[2] = obs_process(c(pred_S$y[4], pred_R$y[4]), list(50, 0.05, 0.95))
+    pred_count[3] = obs_process(c(pred_S$y[7], pred_R$y[7]), list(50, 0.05, 0.95))
+    pred_count[4] = obs_process(c(pred_S$y[10], pred_R$y[10]), list(50, 0.05, 0.95))
+    pred_count[5] = obs_process(c(pred_S$y[13], pred_R$y[13]), list(50, 0.05, 0.95))
+    pred_count[6] = obs_process(c(pred_S$y[16], pred_R$y[16]), list(50, 0.05, 0.95))
+  }
+
+  return(pred_count)
+}
 ```
 
 ```{r}
