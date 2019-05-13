@@ -360,8 +360,8 @@ If you want to center the image, go through HTML code:
 +   setNames(c(&quot;individual_weight_kg&quot;, &quot;week&quot;)) %&gt;% 
 +   dplyr::right_join(viparc, &quot;week&quot;) %&gt;% 
 +   dplyr::mutate(farm_weight_kg = individual_weight_kg * nb_chicken) %&gt;% 
-+   dplyr::mutate_at(dplyr::vars(dplyr::ends_with(&quot;_g&quot;)), list(~ . / farm_weight_kg)) %&gt;% 
-+   dplyr::select(farm, flock, week, respiratory:sudden_death, dplyr::everything(), individual_weight_kg, farm_weight_kg) %&gt;% 
++   dplyr::mutate_at(dplyr::vars(dplyr::ends_with(&quot;_g&quot;)), list(~ . / farm_weight_kg)) %&gt;%
++   dplyr::select(farm, flock, week, respiratory:sampling, individual_weight_kg, farm_weight_kg) %&gt;% 
 +   write.csv(&quot;data/viparc_quantitative.csv&quot;, FALSE, row.names = FALSE)</code></pre>
 </div>
 
