@@ -317,7 +317,7 @@ viparc_qualitative &lt;- readr::read_csv(&quot;https://raw.githubusercontent.com
 <li><strong>flock:</strong> flock ID (in a given farm);</li>
 <li><strong>week:</strong> week number (in a given flock of a given farm);</li>
 <li><strong>respiratory, …, sudden_death:</strong> presence (<code>TRUE</code>) / absence (<code>FALSE</code>) of 6 clinical signs in the flock;</li>
-<li><strong>amoxicillin_g, …, unknown_g:</strong> mass, in g, of the 44 antimicriobial used in the flock;</li>
+<li><strong>amoxicillin_g, …, unknown_g:</strong> use (<code>TRUE</code>) or not (<code>FALSE</code>) of the 44 antimicriobial used in the flock;</li>
 <li><strong>completed:</strong> boolean informing whether the flock is done (<code>TRUE</code>) or still ongoing (<code>FALSE</code>);</li>
 <li><strong>nb_chicken:</strong> total number of chicken in the farm;</li>
 <li><strong>sampling:</strong> boolean informing whether there is feces sampling during the week (<code>TRUE</code>) or not (<code>FALSE</code>).</li>
@@ -325,23 +325,19 @@ viparc_qualitative &lt;- readr::read_csv(&quot;https://raw.githubusercontent.com
 <p>The second data set can be downloaded as so:</p>
 <pre class="r"><code># install.packages(&quot;readr&quot;)
 viparc_quantitative &lt;- readr::read_csv(&quot;https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_quantitative.csv&quot;,
-                                       col_types = paste(c(&quot;cii&quot;, rep(&quot;l&quot;, 6), rep(&quot;d&quot;, 46), &quot;lild&quot;), collapse = &quot;&quot;))</code></pre>
-<pre><code>## Warning in rbind(names(probs), probs_f): number of columns of result is not
-## a multiple of vector length (arg 1)</code></pre>
-<pre><code>## Warning: 14191 parsing failures.
-## row # A tibble: 5 x 5 col     row col       expected       actual file                                expected   &lt;int&gt; &lt;chr&gt;     &lt;chr&gt;          &lt;chr&gt;  &lt;chr&gt;                               actual 1     1 farm      no trailing c… -001   &#39;https://raw.githubusercontent.com… file 2     1 sudden_d… a double       TRUE   &#39;https://raw.githubusercontent.com… row 3     2 farm      no trailing c… -001   &#39;https://raw.githubusercontent.com… col 4     2 sudden_d… a double       FALSE  &#39;https://raw.githubusercontent.com… expected 5     3 farm      no trailing c… -001   &#39;https://raw.githubusercontent.com…
-## ... ................. ... ........................................................................... ........ ........................................................................... ...... ........................................................................... .... ........................................................................... ... ........................................................................... ... ........................................................................... ........ ...........................................................................
-## See problems(...) for more details.</code></pre>
+                                       col_types = paste(c(&quot;cii&quot;, rep(&quot;l&quot;, 6), rep(&quot;d&quot;, 45), &quot;lildd&quot;), collapse = &quot;&quot;))</code></pre>
 <p>It contains 5391 weeks of observation (rows) and 59 variables (columns). The variables are</p>
 <ul>
 <li><strong>farm:</strong> farm ID;</li>
 <li><strong>flock:</strong> flock ID (in a given farm);</li>
 <li><strong>week:</strong> week number (in a given flock of a given farm);</li>
 <li><strong>respiratory, …, sudden_death:</strong> presence (<code>TRUE</code>) / absence (<code>FALSE</code>) of 6 clinical signs in the flock;</li>
-<li><strong>amoxicillin_g, …, unknown_g:</strong> mass, in g, of the 44 antimicriobial used in the flock;</li>
+<li><strong>amoxicillin_g, …, unknown_g:</strong> mass, in g / kg of chicken, of the 44 antimicriobial used in the flock;</li>
 <li><strong>completed:</strong> boolean informing whether the flock is done (<code>TRUE</code>) or still ongoing (<code>FALSE</code>);</li>
 <li><strong>nb_chicken:</strong> total number of chicken in the farm;</li>
-<li><strong>sampling:</strong> boolean informing whether there is feces sampling during the week (<code>TRUE</code>) or not (<code>FALSE</code>).</li>
+<li><strong>sampling:</strong> boolean informing whether there is feces sampling during the week (<code>TRUE</code>) or not (<code>FALSE</code>);</li>
+<li><strong>individual_weight_kg:</strong> average weight in kg of a chicken;</li>
+<li><strong>farm_weight_kg:</strong> expected weight in kg of whole the chicken of the farm.</li>
 </ul>
 </div>
 

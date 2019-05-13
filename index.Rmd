@@ -40,7 +40,7 @@ It contains `r nrow(viparc_qualitative)` weeks of observation (rows) and
 * **flock:** flock ID (in a given farm);
 * **week:** week number (in a given flock of a given farm);
 * **respiratory, ..., sudden_death:** presence (`TRUE`) / absence (`FALSE`) of 6 clinical signs in the flock;
-* **amoxicillin_g, ..., unknown_g:** mass, in g, of the `r nb_ab` antimicriobial used in the flock;
+* **amoxicillin_g, ..., unknown_g:** use (`TRUE`) or not (`FALSE`) of the `r nb_ab` antimicriobial used in the flock;
 * **completed:** boolean informing whether the flock is done (`TRUE`) or still ongoing (`FALSE`);
 * **nb_chicken:** total number of chicken in the farm;
 * **sampling:** boolean informing whether there is feces sampling during the week (`TRUE`) or not (`FALSE`).
@@ -50,7 +50,7 @@ The second data set can be downloaded as so:
 ```{r}
 # install.packages("readr")
 viparc_quantitative <- readr::read_csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_quantitative.csv",
-                                       col_types = paste(c("cii", rep("l", 6), rep("d", 46), "lild"), collapse = ""))
+                                       col_types = paste(c("cii", rep("l", 6), rep("d", 45), "lildd"), collapse = ""))
 ```
 
 ```{r include = FALSE}
@@ -64,7 +64,9 @@ It contains `r nrow(viparc_quantitative)` weeks of observation (rows) and
 * **flock:** flock ID (in a given farm);
 * **week:** week number (in a given flock of a given farm);
 * **respiratory, ..., sudden_death:** presence (`TRUE`) / absence (`FALSE`) of 6 clinical signs in the flock;
-* **amoxicillin_g, ..., unknown_g:** mass, in g, of the `r nb_ab` antimicriobial used in the flock;
+* **amoxicillin_g, ..., unknown_g:** mass, in g / kg of chicken, of the `r nb_ab` antimicriobial used in the flock;
 * **completed:** boolean informing whether the flock is done (`TRUE`) or still ongoing (`FALSE`);
 * **nb_chicken:** total number of chicken in the farm;
-* **sampling:** boolean informing whether there is feces sampling during the week (`TRUE`) or not (`FALSE`).
+* **sampling:** boolean informing whether there is feces sampling during the week (`TRUE`) or not (`FALSE`);
+* **individual_weight_kg:** average weight in kg of a chicken;
+* **farm_weight_kg:** expected weight in kg of whole the chicken of the farm.
