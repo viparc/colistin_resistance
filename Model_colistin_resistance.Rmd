@@ -52,57 +52,6 @@ options(width = 137)
 
 The objective is to build a dynamic model allowing to estimate the effect of antimicrobial usage (AMU), particularly colistin, on colistin resistance in ViParc chicken farms. Available data is:
 
-
-```{r echo=F}
-multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
-  # Multiple plot function
-  # Source: http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)
-  # 
-  # ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
-  # - cols:   Number of columns in layout
-  # - layout: A matrix specifying the layout. If present, 'cols' is ignored.
-  #
-  # If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
-  # then plot 1 will go in the upper left, 2 will go in the upper right, and
-  # 3 will go all the way across the bottom.
-
-  library(grid)
-
-  # Make a list from the ... arguments and plotlist
-  plots <- c(list(...), plotlist)
-
-  numPlots = length(plots)
-
-  # If layout is NULL, then use 'cols' to determine layout
-  if (is.null(layout)) {
-    # Make the panel
-    # ncol: Number of columns of plots
-    # nrow: Number of rows needed, calculated from # of cols
-    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
-                     ncol = cols, nrow = ceiling(numPlots/cols))
-  }
-
-  if (numPlots==1) {
-    print(plots[[1]])
-
-  } else {
-    # Set up the page
-    grid.newpage()
-    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
-
-    # Make each plot, in the correct location
-    for (i in 1:numPlots) {
-      # Get the i,j matrix positions of the regions that contain this subplot
-      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
-
-      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
-                                      layout.pos.col = matchidx$col))
-    }
-  }
-}
-```
-
-
 * Data on ViParc farms, including AMU: [ViParc data overview](https://rpubs.com/choisy/viparc_data).
 * During each production cycle, 3 pooled chicken faeces samples are collected: at the beginning, in the middle and at the end of the cycle. Each pooled sample is believed to represent the faeces of around 50 individual chickens at the sampling day. The proportion of colonies of each  sample that are colistin resistant is determined. Here, a production cycle is assumed to last exactly 16 weeks.The samplings are assumed to occur on weeks 1, 9 and 16.
 
@@ -121,7 +70,7 @@ library(bbmle)
 library(ggplot2)
 library(adaptivetau)
 
-n_samp = 3 # 3 or 6 (Should not be put on 6 for now)
+n_samp = 3 # Maximum number of samples during a given cycle
 
 ```
 
@@ -133,7 +82,8 @@ We load data:
 * `count_data`: proportion of colistin resistant colonies in some of the pooled samples
 
 ```{r}
-viparc_data = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_qualitative.csv")
+# viparc_data = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_qualitative.csv")
+viparc_data = read.csv("C:/Users/Jonathan/Downloads/viparc_qualitative.csv")
 
 count_data = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/ColRdata.csv", sep=";")
 
@@ -141,33 +91,30 @@ count_data = read.csv("https://raw.githubusercontent.com/viparc/colistin_resista
 
 We have the proportion of resistance for the initial samples in farms.
 
-```{r}
-obs_init_true = 0.001 + count_data$ColR /100
-names(obs_init_true) = count_data$ID
-```
-
 We create a matrix containing binary information on AMU (antimicrobial used / not used) for each week (columns) of the production cycle and for each farm (rows): `ab_expo`.
 
 Several cases are possible regarding the farms selected to perform microbiological analyses, and regarding what antibiotics are studied for their effect on colistin resistance.
 
-* Case 0 (`case_amu` = 0). The true AMR and sampling dates in farms for which we have AMR data.
+* Case 0 (`case_amu` = 0). The true colistin use and sampling dates in farms for which we have AMR data. In this case, `n_samp` is set to 3.
 * Case 1 (`case_amu` = 1). We are interested in colistin usage only. The farms analysed are the 10 first farms using colistin + 10 farms using no colistin.
 * Case 2 (`case_amu` = 2). We are interested in colistin usage only. The farms analysed are the 10 first farms using colistin on week 8 (one week before the 2nd sampling) + 10 farms using no colistin.
 * Case 3 (`case_amu` = 3). We are interested in global AMU. The farms analysed are the 20 first farms with a production cycle of `n_weeks` weeks or more.
 
 ```{r}
-case_amu = 0
+case_amu = 3
 
-if (case_amu != 0){
+if (case_amu == 0){
+  n_samp = 3
+  
+  obs_init_true = 0.001 + count_data$ColR /100
+  names(obs_init_true) = count_data$ID
+}else{
   n_cyc = 20
-  n_weeks = 16
-  if(n_samp == 3){
-    weeks_samp = matrix(c(1,9,16), n_cyc, 3, byrow=T)
-  }else if(n_samp == 6){
-    weeks_samp = matrix(seq(1,16,3), n_cyc, 6, byrow=T)
-  }
+  n_weeks = 19
+  obs_init_true = runif(n_cyc,0,1)
+  
+  weeks_samp = matrix(ceiling(seq(1, n_weeks, length.out = n_samp)), n_cyc, n_samp, byrow=T)
 }
-
 ```
 
 ```{r}
@@ -197,25 +144,9 @@ if (case_amu == 0){
   
   weeks_to_keep = which(colSums(!is.na(ab_expo)) != 0)
   ab_expo = ab_expo[,weeks_to_keep]
+  n_weeks = max(weeks_to_keep)
   
-  plot(x=c(0,0.1), y=c(0,0), xlim=c(0,ncol(ab_expo)), ylim=c(0,n_cyc+10), type="l", xlab="Weeks", ylab="Farms")
-  for (i in 1:n_cyc){
-    for (j in 1:ncol(ab_expo)){
-      
-      if ((!(is.na(ab_expo[i,j]))) & (ab_expo[i,j] == 1)){
-        rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "blue", border="blue")
-      }else if ((!(is.na(ab_expo[i,j]))) & (ab_expo[i,j] == 0)){
-        rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "light blue", border="light blue")
-      }
-      
-      if (any(weeks_samp[i,] == j, na.rm=T)){
-        rect(xleft = j-0.1, xright = j+0.1, ybottom = i-0.5, ytop = i+0.5, col = "red", border="red")
-      }
-    }
-  }
-  legend(x=1, y=n_cyc+10, legend=c("Colistin use", "No colistin use", "Samplings"), fill=c("blue", "light blue", "red"), cex = 0.8, ncol=3)
-  
-  rm(i, j, weeks_use, weeks_no_use, farm_i, flockseq_i, case_amu, weeks_to_keep)
+  rm(i, weeks_use, weeks_no_use, farm_i, flockseq_i, case_amu, weeks_to_keep)
   print("Case 0 chosen.")
 
 }else if (case_amu == 1){
@@ -276,6 +207,30 @@ if (case_amu == 0){
 }
 ```
 
+We plot the AMU and sampling dates for the `n_cyc` farms.
+
+```{r}
+plot(x=c(0,0.1), y=c(0,0), xlim=c(0,ncol(ab_expo)), ylim=c(0,n_cyc+10), type="l", xlab="Weeks", ylab="Farms")
+for (i in 1:n_cyc){
+  for (j in 1:ncol(ab_expo)){
+    
+    if ((!(is.na(ab_expo[i,j]))) & (ab_expo[i,j] == 1)){
+      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "blue", border="blue")
+    }else if ((!(is.na(ab_expo[i,j]))) & (ab_expo[i,j] == 0)){
+      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "light blue", border="light blue")
+    }
+    
+    if (any(weeks_samp[i,] == j, na.rm=T)){
+      rect(xleft = j-0.1, xright = j+0.1, ybottom = i-0.5, ytop = i+0.5, col = "red", border="red")
+    }
+  }
+}
+legend(x=1, y=n_cyc+10, legend=c("AMU", "No AMU", "Samplings"), fill=c("blue", "light blue", "red"), cex = 0.8, ncol=3)
+
+rm(i,j)
+
+```
+
 ### Simulated colistin resistance data
 
 As colistin resistance data is not available yet, we simulate colistin resistance data using our model. We assume samples occur on weeks 1, 9 and 16 when 3 samples are collected. In the case 6 samples are collected, they occur on weeks 1, 4, 7, 10, 13, 16.
@@ -312,53 +267,50 @@ eq_mod=function(t, R, param){
 
 We first draw the initial proportion of resistance in the `n_cyc` farms.
 
-```{r}
-obs_init_true = runif(n_cyc,0,1)
-```
-
 We do have the initial proportion of resistance in the farms. We then simulate resistance data for the 2 others samples in each farm, using the model defined earlier, adding some stochastic noise for these "observed" samples. Parameters for the simulated data are: $\alpha = 0.2$ (`alpha_true`) and $A = 2$ (`A_true`).
 
 It is possible to plot the simulated "observed" data for each farm, by setting `plot_sim_data = T`. In this case, dotted lines represent the sampling dates. Black bars represent AMU dates in farms.
 
 ```{r}
-plot_sim_data = F
+plot_sim_data = T
 ```
 
 ```{r}
-if (n_samp == 3){obs = matrix(NA, n_cyc, 3)}else if (n_samp == 6){obs = matrix(NA, n_cyc, 6)}
+obs = matrix(NA, n_cyc, n_samp)
 obs[,1] = obs_init_true
+```
+
+```{r}
 alpha_true = 0.2
 A_true = 2
-for(farm in 1:n_cyc){
-  simul_det = ode(obs_init_true[farm], 1:n_weeks, eq_mod, list(alpha_true, A_true, ab_expo[farm,]))[,2]
-  simul_stoch = rnorm(n=n_weeks, mean=simul_det, sd=0.02)
+```
 
-  if (n_samp == 3){
-    obs[farm,(2:3)] = simul_stoch[weeks_samp[farm,(2:3)]]
-  }else if (n_samp == 6){
-    obs[farm,(2:6)] = simul_stoch[seq(4,16,3)]
-  }
-  
+```{r}
+for(farm in 1:n_cyc){
+  n_weeks_farm = sum(!(is.na(ab_expo[farm,])))
+  n_samp_farm = sum(!(is.na(weeks_samp[farm,])))
+  if(n_samp_farm < 2){print(paste0("CAUTION: For farm ", farm,", the number of samples collected is strictly less than 2"))}
+
+  simul_det = ode(obs_init_true[farm], 1:n_weeks_farm, eq_mod, list(alpha_true, A_true, ab_expo[farm,]))[,2]
+  simul_stoch = rnorm(n=n_weeks_farm, mean=simul_det, sd=0.02)
+
+  obs[farm,(2:n_samp_farm)] = simul_stoch[weeks_samp[farm,(2:n_samp_farm)]]
+
   if(plot_sim_data){
-    plot(simul_stoch, main=paste0("Simulated data for farm ", farm), ylim=c(0,1), type="l",
-         xlab="Time (weeks)", ylab="Proportion of resistant colonies R(t)")
-    for (i in 1:length(ab_expo[farm,])){
+    plot(simul_stoch, main=paste0("Simulated data for farm ", farm), ylim=c(0,1), type="l", xlab="Time (weeks)", ylab="Proportion of resistant colonies R(t)")
+    
+    for (i in 1:n_weeks_farm){
       if (ab_expo[farm,i] == 1){
         rect(xleft = i-0.5, xright = i+0.5, ybottom = 1, ytop = 1.1, col = "black")
       }
     }
-  
-    if (n_samp == 3){
-      for(i in c(1,9,16)){
-        lines(x=c(i,i), y=c(-1,2), lt="dashed")
-      }
-    }else if (n_samp == 6){
-      for(i in seq(1,16,3)){
-        lines(x=c(i,i), y=c(-1,2), lt="dashed")
-      }
+
+    for(i in weeks_samp[farm,(1:n_samp_farm)]){
+      lines(x=c(i,i), y=c(-1,2), lt="dashed")
     }
   }
 }
+rm(i, farm, n_weeks_farm, n_samp_farm, simul_det, simul_stoch)
 ```
 
 ### Parameters estimation
@@ -372,42 +324,42 @@ run1 = function(param){
   alpha = param[1]
   A = param[2]
 
-  pred = matrix(NA, n_cyc, n_weeks)
+  pred_sampl_dates = matrix(NA, n_cyc, n_samp)
+  
   for (farm in 1:n_cyc){
-    pred[farm,] = ode(obs[farm, 1], 1:n_weeks, eq_mod, list(alpha, A, ab_expo[farm,]))[,2]
-  }
+    n_weeks_farm = sum(!(is.na(ab_expo[farm,])))
+    n_samp_farm = sum(!(is.na(weeks_samp[farm,])))
+    if(n_samp_farm < 2){print(paste0("CAUTION: For farm ", farm,", the number of samples collected is strictly less than 2"))}
 
-  if (n_samp == 3){
-    pred_sampl_dates = pred[,c(1,9,16)]
-    colnames(pred_sampl_dates) = colnames(obs) = c("S1","S2","S3")
-  }else if (n_samp == 6){
-    pred_sampl_dates = pred[,seq(1,16,3)]
-    colnames(pred_sampl_dates) = colnames(obs) = c("S1","S2","S3","S4","S5","S6")
+    pred_farm = ode(obs_init_true[farm], 1:n_weeks_farm, eq_mod, list(alpha, A, ab_expo[farm,]))[,2]
+    
+    pred_sampl_dates[farm, (1:n_samp_farm)] = pred_farm[weeks_samp[farm,(1:n_samp_farm)]]
   }
+  rm(farm, pred_farm, n_weeks_farm, n_samp_farm)
 
-  to_min = sum((pred_sampl_dates-obs)^2)
+  to_min = sum((pred_sampl_dates-obs)^2, na.rm=T)
 
   return(to_min)
-  # return(list(to_min, pred))
+  # return(list(to_min, pred_sampl_dates))
 }
 
 run2 = function(alpha, A, k){
 
-  pred = matrix(NA, n_cyc, n_weeks)
+  pred_sampl_dates = matrix(NA, n_cyc, n_samp)
+  
   for (farm in 1:n_cyc){
-    pred[farm,] = ode(obs[farm, 1], 1:n_weeks, eq_mod, list(alpha, A, ab_expo[farm,]))[,2]
-  }
+    n_weeks_farm = sum(!(is.na(ab_expo[farm,])))
+    n_samp_farm = sum(!(is.na(weeks_samp[farm,])))
+    if(n_samp_farm < 2){print(paste0("CAUTION: For farm ", farm,", the number of samples collected is strictly less than 2"))}
 
-  if (n_samp == 3){
-    pred_sampl_dates = pred[,c(1,9,16)]
-    colnames(pred_sampl_dates) = colnames(obs) = c("S1","S2","S3")
-  }else if (n_samp == 6){
-    pred_sampl_dates = pred[,seq(1,16,3)]
-    colnames(pred_sampl_dates) = colnames(obs) = c("S1","S2","S3","S4","S5","S6")
+    pred_farm = ode(obs_init_true[farm], 1:n_weeks_farm, eq_mod, list(alpha, A, ab_expo[farm,]))[,2]
+    
+    pred_sampl_dates[farm, (1:n_samp_farm)] = pred_farm[weeks_samp[farm,(1:n_samp_farm)]]
   }
+  rm(farm, pred_farm, n_weeks_farm, n_samp_farm)
 
   # return(-sum(dnorm(x=obs, mean=pred_sampl_dates, sd=k, log=T)))
-  return(-sum(dbeta(x=obs, shape1=k, shape2=k*(1.00001-pred_sampl_dates)/(pred_sampl_dates+0.00001), log=T)))
+  return(-sum(dbeta(x=obs, shape1=k, shape2=k*(1.00001-pred_sampl_dates)/(pred_sampl_dates+0.00001), log=T), na.rm=T))
 }
 ```
 
@@ -433,6 +385,55 @@ print(fit_coef)
 
 ### Plot of model predictions
 
+```{r echo=F}
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  # Multiple plot function
+  # Source: http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)
+  # 
+  # ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+  # - cols:   Number of columns in layout
+  # - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+  #
+  # If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+  # then plot 1 will go in the upper left, 2 will go in the upper right, and
+  # 3 will go all the way across the bottom.
+
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+  if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
 We plot observations (red dots) and model predictions (black line and CI) for `farms_plot` farms (including 2 farms using colistin): farms 1, 2, 11, 12.
 
 AMU is represented as blue bars.
@@ -443,26 +444,32 @@ farms_plot = c(1,2,11,12)
 
 ```{r warning=F}
 pred_vs_obs = data.frame(farm=rep(NA, n_cyc*n_weeks), week=rep(NA, n_cyc*n_weeks), obs=rep(NA, n_cyc*n_weeks), pred_val=rep(NA, n_cyc*n_weeks), pred_inf=rep(NA, n_cyc*n_weeks), pred_sup=rep(NA, n_cyc*n_weeks), exp_ab=rep(NA, n_cyc*n_weeks))
+
 pred_vs_obs$farm = as.vector(matrix(rep(seq(1,n_cyc),n_weeks), n_weeks, n_cyc, byrow=T))
 pred_vs_obs$week = rep(seq(1,n_weeks),n_cyc)
-for (f in 1:n_cyc){
-  if (n_samp == 3){
-    pred_vs_obs$obs[which((pred_vs_obs$farm==f) & (pred_vs_obs$week %in% c(1,9,16)))] = obs[f,]
-  }else if (n_samp == 6){
-    pred_vs_obs$obs[which((pred_vs_obs$farm==f) & (pred_vs_obs$week %in% seq(1,16,3)))] = obs[f,]
-  }
 
-  predict_farm = ode(obs[f, 1], 1:n_weeks, eq_mod, list(fit_coef[1], fit_coef[2], ab_expo[f,]))[,2]
-  pred_vs_obs$pred_val[which(pred_vs_obs$farm == f)] = predict_farm
+for (f in 1:n_cyc){
+  n_weeks_farm = sum(!(is.na(ab_expo[f,])))
+  n_samp_farm = sum(!(is.na(weeks_samp[f,])))
+  if(n_samp_farm < 2){print(paste0("CAUTION: For farm ", f,", the number of samples collected is strictly less than 2"))}
+
+  pred_vs_obs$obs[which((pred_vs_obs$farm==f) & (pred_vs_obs$week %in% weeks_samp[f,(1:n_samp_farm)]))] = obs[f, (1:n_samp_farm)]
+
+  predict_farm = ode(obs[f, 1], 1:n_weeks_farm, eq_mod, list(fit_coef[1], fit_coef[2], ab_expo[f,]))[,2]
+  
+  pred_vs_obs$pred_val[which((pred_vs_obs$farm==f) & (pred_vs_obs$week %in%(1:n_weeks_farm)))] = predict_farm
 
   # Si ecarts suivent une loi beta:
-  pred_vs_obs$pred_inf[which(pred_vs_obs$farm == f)] = qbeta(p=0.025, shape1=fit_coef[3], shape2=fit_coef[3]*(1.00001-predict_farm)/(predict_farm+0.00001))
-  pred_vs_obs$pred_sup[which(pred_vs_obs$farm == f)] = qbeta(p=0.975, shape1=fit_coef[3], shape2=fit_coef[3]*(1.00001-predict_farm)/(predict_farm+0.00001))
+  pred_vs_obs$pred_inf[which((pred_vs_obs$farm==f) & (pred_vs_obs$week %in%(1:n_weeks_farm)))] = qbeta(p=0.025, shape1=fit_coef[3], shape2=fit_coef[3]*(1.00001-predict_farm)/(predict_farm+0.00001))
+  
+  pred_vs_obs$pred_sup[which((pred_vs_obs$farm==f) & (pred_vs_obs$week %in%(1:n_weeks_farm)))] = qbeta(p=0.975, shape1=fit_coef[3], shape2=fit_coef[3]*(1.00001-predict_farm)/(predict_farm+0.00001))
 
   pred_vs_obs$exp_ab[which(pred_vs_obs$farm == f)] = ab_expo[f,]
-
+  
+  rm(predict_farm)
 }
 pred_vs_obs$exp_ab[pred_vs_obs$exp_ab == 0] = NA
+rm(f, n_weeks_farm, n_samp_farm)
 
 pl = list()
 iter_list = 0
@@ -477,6 +484,7 @@ for (far in farms_plot){
   pl[[iter_list]] = p
 }
 multiplot(plotlist=pl, cols=2)
+rm(far, farms_plot, iter_list, p, pl)
 ```
 
 
