@@ -487,7 +487,7 @@ rm(far, farms_plot, iter_list, p, pl)
 ```
 
 
-## Model 2: Metapopulation of chicken intestinal microbiotes (not implemented yet)
+## Model 2: Metapopulation of chicken intestinal microbiotes
 
 In this model, we study the interaction of individual chicken microbiotes with farms environment. In a given farm f, we consider the variable $R_i(t)$ representing the proportion of bacteria presenting a colistin resistance phenotype in a chicken i. As the sum of proportions of sensitive and resistant bacteria is 1, we only focus on the proportion of resistant bacteria.
 
@@ -509,6 +509,117 @@ $\alpha$ represents the effect of AMU on colistin resistance dynamics:
 * If $\alpha < 1$, AMU increases colistin resistance in chicken guts.
 * If $\alpha > 1$, AMU decreases colistin resistance in chicken guts.
 
+It is possible to add a death process for chickens (as the mortality on farm is high).
+
+We define the model:
+
+```{r}
+eq_mod_2 = function(t, R, param){
+  N_chi_farm = param[[1]]
+  
+  alpha = param[[2]]
+  A = param[[3]]
+  beta = param[[4]]
+  ab_expo_farm = param[[5]]
+  
+  dR = rep(NA, N_chi_farm)
+  
+  for(i in 1:N_chi_farm){
+    dR[i] = 1 - (1 + A * (alpha ^ ab_expo_farm[t])) * R[i] + beta * (mean(R) - R[i])
+  }
+
+  return(list(dR))
+}
+```
+
+We also model the observation process. Indeed, the faeces collected during sampling are only those of a number `n_chick_samp` of chickens in the farm.
+
+```{r}
+n_chick_samp = 50
+obs_process_mod2=function(R, n_chick_samp){
+  
+  # We cannot sample more chickens than there is on the farm:
+  n_chick_samp_farm = min(n_chick_samp, length(R))
+  
+  chick_samp = sample(1:length(R), n_chick_samp_farm)
+  
+  return(R[chick_samp])
+}
+```
+
+### Relationship between the proportion of resistant colonies and the prevalence in chickens
+
+It can be useful to know what is the prevalence of chickens carrying resistance. It means we have to define what a "R" chicken is. More exactly we have to define what proportion `thresh` of a chicken's flora has to be resistant, to call a chicken "R".
+
+$ \forall i \in [1;N_{chi}]$,	if $R_i > thresh$, $i$ is defined as a "R" chicken.
+
+We therefore investigate the relationship between the proportion of resistant bacteria in a set of chickens $R_j$, and the proportion of "R" chickens $R_{chick}$.
+
+We define the ratio $Q$ as:
+
+$$ Q = \frac{R_{chick}}{\overline{R_j}} $$
+If $Q \approx 1$, it means the proportion of resistant colonies is a good proxy of the prevalence of resistance in chickens.
+
+We define the function:
+
+```{r}
+propcol_prev_rat = function(R, thresh){
+  prev = sum(R > thresh)/length(R)
+  
+  ratio = prev/(mean(R) + 0.00001)
+  
+  return(ratio)
+}
+
+```
+
+Let us suppose the proportion of resistant bacteria ($R_i$) in the set of chickens is drawn in a Gaussian of mean `mean_Ri` and SD 0.05.
+
+We plot the value of $Q$ depending of the values of `mean_Ri` and `thresh`. Note that, for illustration conveniency, all values >2 are set to 2.
+
+```{r}
+val_thresh = seq(0, 1, 0.01)
+val_mean_Ri = seq(0.1, 0.9, 0.01)
+
+val_tab = as.data.frame(matrix(NA, length(val_thresh)*length(val_mean_Ri), 3))
+colnames(val_tab) = c("val_thresh", "val_mean_Ri", "val_ratio")
+
+iter = 0
+for (i in val_thresh){
+  for (j in val_mean_Ri){
+    iter = iter + 1
+    
+    val_tab$val_thresh[iter] = i
+    val_tab$val_mean_Ri[iter] = j
+    
+    R_test = -1
+    count_while = 0
+    while(((any(R_test < 0))|(any(R_test > 1))) & (count_while <= 1000)){
+      count_while = count_while + 1
+      if(count_while == 1000){print("Impossible to have a vector of Ri between 0 and 1 with this value of mean")}
+      
+      R_test = rnorm(100, j, 0.05)
+    }
+    
+    if(count_while < 1000){
+      val_tab$val_ratio[iter] = propcol_prev_rat(R_test, i)
+    }
+  }
+}
+val_tab$val_ratio[which(val_tab$val_ratio > 2)] = 2
+rm(i, j, iter, count_while, R_test, val_thresh, val_mean_Ri)
+
+p = ggplot(data = val_tab, aes(x=val_thresh, y=val_mean_Ri))
+p = p + ggtitle("[Prevalence in chickens] / [Proportion of resistant colonies in the pooled sample]")
+p = p + ylab("Mean of Ri") + xlab("Positivity threshold for considering a chicken carries resistance")
+p = p + geom_tile(aes(fill = val_ratio))
+p + scale_fill_gradient2("Ratio Q", low = rgb(1,0,0), mid = rgb(1,1,1), high = rgb(0,0,1), midpoint = 1, na.value = rgb(0,0,0))
+
+
+```
+
+We can observe that the value of Q is highly dependant on the distribution of the set of chicken microbiota $R_j$, and on the threshold value.
+
 ### Model 2bis: Metapopulation of chicken intestinal microbiotes with environment
 
 What is added to Model 2 is $R_e(t)$, which is the proportion of resistant bacteria in the environment of the farm. We consider the transmission of bacteria between chickens only occurs through the environment.
@@ -519,6 +630,15 @@ $$\begin{align*}
 \end{align*}$$
 
 $\beta_1$ and $\beta_2$ (>0) represent the transmission of resistant bacteria from environment to chicken guts, and from chicken guts to environment, respectively. The other parameters are the same than in Model 2.
+
+<!-- ## Comparison of models 1 and 2: does model 2 add something ? -->
+
+<!-- Models 1 and 2 are similar because they both model a proportion of resistant bacteria. -->
+
+<!-- * In model 1, we model the proportion of resistant bacteria in the global population of bacteria on farm (not considering the internal dynamics of a given farm) -->
+<!-- * In model 2, we model the interaction between chickens' gut flora: it's a metapopulation of bacteria -->
+
+<!-- We want to compare the value of $R$ as defined in model 1, and the mean value of $R_i$ as defined in model 2, with a same range of parameters. -->
 
 ## Model 3: "R" and "S" chicken individuals (stochastic)
 
@@ -553,11 +673,13 @@ We also model the observation process. Indeed, the faeces collected during sampl
 
 ```{r}
 n_chick_samp = 50
-obs_process=function(state, param){
+obs_process_mod3=function(state, param){
   S = state[1]
   R = state[2]
   
-  n_chick_samp = min(param[[1]], S+R) # Number of individuals whose feces are collected
+  # We cannot sample more chickens than there is on the farm:
+  n_chick_samp = min(param[[1]], S+R)
+  
   pS = param[[2]] # Proportion of resistant bacteria in "S" chickens
   pR = param[[3]] # Proportion of resistant bacteria in "R" chickens
   
@@ -573,7 +695,7 @@ obs_process=function(state, param){
 
 ### Testing the observation process in Model 3
 
-We investigate the relationship between the proportion of "R" individual chickens $\frac{R(t)}{S(t)+R(t)}$ (i.e. chickens carrying resistant bacteria, as opposed to "S" chickens) in the farm, and the proportion of resistant $R_e(t)$.
+We investigate the relationship between the proportion of "R" individual chickens $\frac{R(t)}{S(t)+R(t)}$ (i.e. chickens carrying resistant bacteria, as opposed to "S" chickens) in the farm, and the proportion of resistant colonies $R_e(t)$.
 
 We define the ratio $Q$ as:
 
@@ -594,7 +716,7 @@ plot_Q = function(S_farm, R_farm, val_pS=seq(0,1,0.05), val_pR=seq(0,1,0.05), n_
     for(pR in val_pR[which(val_pR >= pS)]){
       Q_rat = c()
       for (iter in 1:100){
-        Q_rat = c(Q_rat, obs_process(c(S_farm, R_farm), list(n_chick_samp, pS, pR)))
+        Q_rat = c(Q_rat, obs_process_mod3(c(S_farm, R_farm), list(n_chick_samp, pS, pR)))
       }
       sens_an$val_proxy[which((sens_an$val_pS == pS) & (sens_an$val_pR == pR))] = (R_farm /(S_farm + R_farm))/mean(Q_rat)
     }
@@ -657,7 +779,7 @@ plot_sd_Q = function(S_farm, R_farm, val_pS=seq(0,1,0.05), val_pR=seq(0,1,0.05),
     for(pR in val_pR[which(val_pR >= pS)]){
       Q_rat = c()
       for (iter in 1:100){
-        Q_rat = c(Q_rat, obs_process(c(S_farm, R_farm), list(n_chick_samp, pS, pR)))
+        Q_rat = c(Q_rat, obs_process_mod3(c(S_farm, R_farm), list(n_chick_samp, pS, pR)))
       }
       sens_an$val_proxy[which((sens_an$val_pS == pS) & (sens_an$val_pR == pR))] = sd(Q_rat)
     }
@@ -745,7 +867,7 @@ pred_mod_3 = function(farm, param){
   # Observation process:
   pred_count = rep(NA, n_samp)
   for (w in 1:n_samp_farm){
-    pred_count[w] = obs_process(c(pred_S$y[weeks_samp[farm,w]], pred_R$y[weeks_samp[farm,w]]), list(50, pS, pR))
+    pred_count[w] = obs_process_mod3(c(pred_S$y[weeks_samp[farm,w]], pred_R$y[weeks_samp[farm,w]]), list(50, pS, pR))
   }
 
   return(pred_count)
@@ -789,7 +911,7 @@ var_f_size = function(flock_size = as.numeric(init_flock_size[3])){
     # Observation process:
     pred_count = rep(NA, n_samp)
     for (w in 1:n_samp_farm){
-      pred_count[w] = obs_process(c(pred_S$y[weeks_samp[3,w]], pred_R$y[weeks_samp[3,w]]), list(50, pS_rand, pR_rand))
+      pred_count[w] = obs_process_mod3(c(pred_S$y[weeks_samp[3,w]], pred_R$y[weeks_samp[3,w]]), list(50, pS_rand, pR_rand))
     }
       
     pred_simu[simu,] = pred_count
