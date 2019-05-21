@@ -76,9 +76,9 @@ We load data:
 
 ```{r}
 viparc_data = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_qualitative.csv")
-# viparc_data = read.csv("C:/Users/Jonathan/Downloads/viparc_qualitative.csv")
 
-count_data = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/ColRdata.csv", sep=";")
+# count_data = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/ColRdata_210519.csv", sep=";")
+count_data = read.csv("C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/ColRdata_210519.csv", sep=";", skip=1)[,1:7]
 
 ```
 
@@ -88,7 +88,7 @@ Some farms from the ViParc study were already chosen for resistant colonies coun
 
 Several cases are therefore possible. In all cases, AMU data is actually observed in the study and not simulated. We create a matrix containing binary information on AMU (antimicrobial used / not used) for each week (columns) of the production cycle and for each farm (rows): `ab_expo`.
 
-* Case 1 (`case_amu = 1`). We use real counting measures for selected farms, and real cycle lengths. As, for now, only initial samples are available, we simulate the counts for the other samples. In this case, `n_samp` is set to 3 (real value in the study). We focus on colistin use.
+* Case 1 (`case_amu = 1`). We use real counting measures for selected farms, and real cycle lengths. As, for now, only initial samples are available, we simulate the counts for the other samples. In this case, `n_samp` is set to 3 (real value in the study). We can focus on one (e.g. colistin use) or several antibiotics for use data.
 
 * In cases 2 and 3, the number of cycles included is set to `n_cyc = 30`. We simulate all counting measures. We can choose the number of samples `n_samp` collected in farms. We can choose the length of production cycles `n_weeks` (is similar across all farms). The sampling dates are calculated depending on `n_weeks` and `n_samp`.
 
@@ -105,6 +105,12 @@ n_samp = 3 # Maximum number of samples during a cycle
 n_weeks = 16 # Maximum length of production cycle among those included
 ```
 
+If case 1 (`case_amu=1`) is chosen, we then specify the antibiotics in which we want to include AMU:
+
+```{r}
+ab_inc_amu = "colistin_use"
+```
+
 We define `n_cyc` and `obs_init_true` (proportion of resistant colonies in the initial samples) depending on the case chosen:
 
 ```{r}
@@ -112,11 +118,21 @@ if (case_amu == 1){
   n_samp = 3
   n_cyc = nrow(count_data)
   
-  obs_init_true = 0.001 + count_data$ColR /100
-  names(obs_init_true) = count_data$ID
+  obs_init_true = 0.001 + count_data$Start /100
+  
+  obs = matrix(NA, n_cyc, n_samp)
+  
+  obs[,1] = obs_init_true
+  obs[,c(2,3)] = 0.001 + cbind(count_data$Mid, count_data$End)/100
+  names(obs_init_true) = rownames(obs) = count_data$FarmID
 }else{
   n_cyc = 30 # Number of cycles (farms) included
+  
   obs_init_true = runif(n_cyc,0,1)
+  
+  obs = matrix(NA, n_cyc, n_samp)
+  obs[,1] = obs_init_true
+  
   weeks_samp = matrix(ceiling(seq(1, n_weeks, length.out = n_samp)), n_cyc, n_samp, byrow=T)
   init_flock_size = rep(200, n_cyc)
 }
@@ -140,10 +156,19 @@ if (case_amu == 1){
       print(paste0("For farm ",farm_i,", flock sequence ",flockseq_i,", the production cycle was not completed"))
     }
     
-    weeks_use = viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(viparc_data$colistin_use == T))]
-    ab_expo[i, weeks_use] = 1
+    if(length(ab_inc_amu) > 1){
+      
+      weeks_use = viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(rowSums(viparc_data[,ab_inc_amu], na.rm=T) !=0))]
+      weeks_no_use = viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(rowSums(viparc_data[,ab_inc_amu], na.rm=T) ==0))]
+      
+    }else if(length(ab_inc_amu) == 1){
+      
+      weeks_use = viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(viparc_data[,ab_inc_amu] == T))]
+      weeks_no_use = viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(viparc_data[,ab_inc_amu] == F))]
+
+    }
     
-    weeks_no_use = viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(viparc_data$colistin_use == F))]
+    ab_expo[i, weeks_use] = 1
     ab_expo[i, weeks_no_use] = 0
     
     weeks_samp[i,] = c(viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(viparc_data$sampling == T))], rep(NA, n_samp))[1:n_samp]
@@ -155,7 +180,7 @@ if (case_amu == 1){
   ab_expo = ab_expo[,weeks_to_keep]
   n_weeks = max(weeks_to_keep)
   
-  rm(i, weeks_use, weeks_no_use, farm_i, flockseq_i, case_amu, weeks_to_keep)
+  rm(i, weeks_use, weeks_no_use, farm_i, flockseq_i, weeks_to_keep)
   print("Case 1 chosen.")
 
 }else if (case_amu == 2){
@@ -172,7 +197,7 @@ if (case_amu == 1){
     ab_expo[i, weeks_use[which(weeks_use <= n_weeks)]] = 1
   }
   ab_expo = rbind(ab_expo, matrix(0,15,n_weeks))
-  rm(i, f_using_col_before_week_9, weeks_use, farm_i, flockseq_i, case_amu)
+  rm(i, f_using_col_before_week_9, weeks_use, farm_i, flockseq_i)
   print("Case 2 chosen.")
 
 }else if (case_amu == 3){
@@ -195,7 +220,7 @@ if (case_amu == 1){
     }
     ab_expo[i,] = weeks_use
   }
-  rm(i, w, iter_farm, weeks_use, weeks_cycle, farm_i, case_amu)
+  rm(i, w, iter_farm, weeks_use, weeks_cycle, farm_i)
   print("Case 3 chosen.")
 
 }else{
@@ -260,55 +285,58 @@ eq_mod=function(t, R, param){
 }
 ```
 
-### Simulated "observed" colistin resistance data
+### Simulated "observed" colistin resistance data (for the `case_amu` $\neq$ 1)
 
 We do have the initial proportion of resistance in the farms (real or simulated depending on what was chosen). We then simulate resistance data for the 2 others samples in each farm, using Model 1, adding some stochastic noise for these "observed" samples. Parameters for the simulated data are `alpha_true` and `A_true`, defined below.
 
 It is possible to plot the simulated "observed" data for each farm, by setting `plot_sim_data = T`. In this case, dotted lines represent the sampling dates. Black bars represent AMU dates in farms.
 
 ```{r}
-plot_sim_data = F
+if(case_amu != 1){
+  plot_sim_data = F
+}
 ```
 
 ```{r}
-obs = matrix(NA, n_cyc, n_samp)
-obs[,1] = obs_init_true
-```
-
-```{r}
-alpha_true = 0.2
-A_true = 2
+if(case_amu != 1){
+  alpha_true = 0.2
+  A_true = 2
+}
 ```
 
 Data simulation:
 
 ```{r}
-for(farm in 1:n_cyc){
-  n_weeks_farm = sum(!(is.na(ab_expo[farm,])))
-  n_samp_farm = sum(!(is.na(weeks_samp[farm,])))
-  if(n_samp_farm < 2){print(paste0("CAUTION: For farm ", farm,", the number of samples collected is strictly less than 2"))}
+if(case_amu != 1){
 
-  simul_det = ode(obs_init_true[farm], 1:n_weeks_farm, eq_mod, list(alpha_true, A_true, ab_expo[farm,]))[,2]
-  simul_stoch = rnorm(n=n_weeks_farm, mean=simul_det, sd=0.02)
-
-  obs[farm,(2:n_samp_farm)] = simul_stoch[weeks_samp[farm,(2:n_samp_farm)]]
-
-  if(plot_sim_data){
-    plot(simul_stoch, main=paste0("Simulated data for farm ", farm), ylim=c(0,1), type="l", xlab="Time (weeks)", ylab="Proportion of resistant colonies R(t)")
-    
-    for (i in 1:n_weeks_farm){
-      if (ab_expo[farm,i] == 1){
-        rect(xleft = i-0.5, xright = i+0.5, ybottom = 1, ytop = 1.1, col = "black")
+  for(farm in 1:n_cyc){
+    n_weeks_farm = sum(!(is.na(ab_expo[farm,])))
+    n_samp_farm = sum(!(is.na(weeks_samp[farm,])))
+    if(n_samp_farm < 2){print(paste0("CAUTION: For farm ", farm,", the number of samples collected is strictly less than 2"))}
+  
+    simul_det = ode(obs_init_true[farm], 1:n_weeks_farm, eq_mod, list(alpha_true, A_true, ab_expo[farm,]))[,2]
+    simul_stoch = rnorm(n=n_weeks_farm, mean=simul_det, sd=0.02)
+  
+    obs[farm,(2:n_samp_farm)] = simul_stoch[weeks_samp[farm,(2:n_samp_farm)]]
+  
+    if(plot_sim_data){
+      plot(simul_stoch, main=paste0("Simulated data for farm ", farm), ylim=c(0,1), type="l", xlab="Time (weeks)", ylab="Proportion of resistant colonies R(t)")
+      
+      for (i in 1:n_weeks_farm){
+        if (ab_expo[farm,i] == 1){
+          rect(xleft = i-0.5, xright = i+0.5, ybottom = 1, ytop = 1.1, col = "black")
+        }
       }
+  
+      for(i in weeks_samp[farm,(1:n_samp_farm)]){
+        lines(x=c(i,i), y=c(-1,2), lt="dashed")
+      }
+      rm(i)
     }
-
-    for(i in weeks_samp[farm,(1:n_samp_farm)]){
-      lines(x=c(i,i), y=c(-1,2), lt="dashed")
-    }
-    rm(i)
   }
+  rm(farm, n_weeks_farm, n_samp_farm, simul_det, simul_stoch)
+  
 }
-rm(farm, n_weeks_farm, n_samp_farm, simul_det, simul_stoch)
 ```
 
 ### Parameters estimation
@@ -438,7 +466,7 @@ We plot observations (red dots) and model predictions (black line and CI) for `f
 AMU is represented as blue bars.
 
 ```{r}
-farms_plot = c(1,2,16,17)
+farms_plot = 1:11
 ```
 
 ```{r warning=F}
@@ -482,7 +510,7 @@ for (far in farms_plot){
   p = p + geom_rect(aes(xmin=week*exp_ab-0.5, xmax=week*exp_ab+0.5, ymin=0.97, ymax=1), fill="blue")
   pl[[iter_list]] = p
 }
-multiplot(plotlist=pl, cols=2)
+multiplot(plotlist=pl, cols=3)
 rm(far, farms_plot, iter_list, p, pl)
 ```
 
@@ -923,7 +951,7 @@ var_f_size = function(flock_size = as.numeric(init_flock_size[3])){
 
 We plot the evolution of SD with the flock size:
 
-```{r}
+```{r, cache=T}
 val_flock_size = c(50, 100, 300, 500, 1000, 2000, 5000)
 evo_sd = as.data.frame(matrix(c(val_flock_size, rep(NA, length(val_flock_size))), length(val_flock_size), 2))
 colnames(evo_sd) = c("flocksize", "sd")
