@@ -71,11 +71,15 @@ library(adaptivetau)
 
 We load data:
 
-* `viparc_data`: Includes production cycles, AMU, sampling dates in ViParc farms.
+* `viparc_data_quali` and `viparc_data_quanti`: Includes production cycles, AMU (resp. qualitative and quantitative), sampling dates in ViParc farms.
 * `count_data`: Proportion of colistin resistant colonies in some of the pooled samples. For now, `count_data` only includes the proportion of resistance for the initial samples in some of the farms.
 
-```{r}
-viparc_data = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_qualitative.csv")
+```{r, cache=T}
+# viparc_data_quali = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_qualitative.csv")
+# viparc_data_quanti = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_quantitative.csv")
+
+viparc_data_quali = read.csv("C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/viparc_qualitative.csv")
+viparc_data_quanti = read.csv("C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/viparc_quantitative.csv")
 
 # count_data = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/ColRdata_210519.csv", sep=";")
 count_data = read.csv("C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/ColRdata_210519.csv", sep=";", skip=1)[,1:7]
@@ -109,6 +113,7 @@ If case 1 (`case_amu=1`) is chosen, we then specify the antibiotics in which we 
 
 ```{r}
 ab_inc_amu = "colistin_use"
+# ab_inc_amu = colnames(viparc_data_quali)[10:54]
 ```
 
 We define `n_cyc` and `obs_init_true` (proportion of resistant colonies in the initial samples) depending on the case chosen:
@@ -143,7 +148,8 @@ We calculate `ab_expo`, `weeks_samp` (week of samplings for each cycle included)
 ```{r}
 if (case_amu == 1){
   
-  ab_expo = matrix(NA, n_cyc, max(viparc_data$week))
+  ab_expo = matrix(NA, n_cyc, max(viparc_data_quali$week))
+  ab_expo_quanti = matrix(NA, n_cyc, max(viparc_data_quali$week))
   weeks_samp = matrix(NA, n_cyc, n_samp)
   init_flock_size = rep(NA, n_cyc)
   rownames(ab_expo) = rownames(weeks_samp) = names(init_flock_size) = count_data$ID
@@ -152,32 +158,40 @@ if (case_amu == 1){
     farm_i = as.character(count_data$FarmID[i])
     flockseq_i = as.character(count_data$Flockseq[i])
     
-    if(!(any(viparc_data$completed[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i))]) == T)){
+    if(!(any(viparc_data_quali$completed[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i))]) == T)){
       print(paste0("For farm ",farm_i,", flock sequence ",flockseq_i,", the production cycle was not completed"))
     }
     
     if(length(ab_inc_amu) > 1){
       
-      weeks_use = viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(rowSums(viparc_data[,ab_inc_amu], na.rm=T) !=0))]
-      weeks_no_use = viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(rowSums(viparc_data[,ab_inc_amu], na.rm=T) ==0))]
+      weeks_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(rowSums(viparc_data_quali[,ab_inc_amu], na.rm=T) !=0))]
+      weeks_no_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(rowSums(viparc_data_quali[,ab_inc_amu], na.rm=T) ==0))]
       
     }else if(length(ab_inc_amu) == 1){
       
-      weeks_use = viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(viparc_data[,ab_inc_amu] == T))]
-      weeks_no_use = viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(viparc_data[,ab_inc_amu] == F))]
+      weeks_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali[,ab_inc_amu] == T))]
+      weeks_no_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali[,ab_inc_amu] == F))]
 
     }
     
     ab_expo[i, weeks_use] = 1
     ab_expo[i, weeks_no_use] = 0
     
-    weeks_samp[i,] = c(viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(viparc_data$sampling == T))], rep(NA, n_samp))[1:n_samp]
+    for(wk in weeks_use){
+      ab_expo_quanti[i, wk] = max(viparc_data_quanti[which((viparc_data_quanti$farm == farm_i)&(viparc_data_quanti$flock == flockseq_i)&(viparc_data_quanti$week == wk)), which(colnames(viparc_data_quali) %in% ab_inc_amu)])
+    }
+    for(wk in weeks_no_use){
+      ab_expo_quanti[i, wk] = 0
+    }
     
-    init_flock_size[i] = viparc_data$nb_chicken[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(viparc_data$week == 1))]
+    weeks_samp[i,] = c(viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali$sampling == T))], rep(NA, n_samp))[1:n_samp]
+    
+    init_flock_size[i] = viparc_data_quali$nb_chicken[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali$week == 1))]
   }
   
   weeks_to_keep = which(colSums(!is.na(ab_expo)) != 0)
   ab_expo = ab_expo[,weeks_to_keep]
+  ab_expo_quanti = ab_expo_quanti[,weeks_to_keep]
   n_weeks = max(weeks_to_keep)
   
   rm(i, weeks_use, weeks_no_use, farm_i, flockseq_i, weeks_to_keep)
@@ -185,7 +199,7 @@ if (case_amu == 1){
 
 }else if (case_amu == 2){
 
-  f_using_col_before_week_9 = viparc_data[which(viparc_data$week %in% c(8) & viparc_data$colistin == T), c("farm","flock")]
+  f_using_col_before_week_9 = viparc_data_quali[which(viparc_data_quali$week %in% c(8) & viparc_data_quali$colistin == T), c("farm","flock")]
   f_using_col_before_week_9 = f_using_col_before_week_9[which(duplicated(f_using_col_before_week_9)==F),]
   if (nrow(f_using_col_before_week_9) <15){print("Number of adequate farms is less than 15")}
 
@@ -193,7 +207,7 @@ if (case_amu == 1){
   for(i in 1:15){
     farm_i = f_using_col_before_week_9$farm[i]
     flockseq_i = f_using_col_before_week_9$flock[i]
-    weeks_use = viparc_data$week[which((viparc_data$farm == farm_i)&(viparc_data$flock == flockseq_i)&(viparc_data$colistin == T))]
+    weeks_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali$colistin == T))]
     ab_expo[i, weeks_use[which(weeks_use <= n_weeks)]] = 1
   }
   ab_expo = rbind(ab_expo, matrix(0,15,n_weeks))
@@ -208,15 +222,15 @@ if (case_amu == 1){
     weeks_cycle = c()
     while(!(n_weeks %in% weeks_cycle)){
       iter_farm = iter_farm + 1
-      if(iter_farm == (length(names(table(factor(viparc_data$farm)))) +1)){print("No more farm respecting the criteria")}
+      if(iter_farm == (length(names(table(factor(viparc_data_quali$farm)))) +1)){print("No more farm respecting the criteria")}
 
-      farm_i = names(table(factor(viparc_data$farm)))[iter_farm]
-      weeks_cycle = viparc_data$week[which((viparc_data$farm==farm_i)&(viparc_data$flock==1))]
+      farm_i = names(table(factor(viparc_data_quali$farm)))[iter_farm]
+      weeks_cycle = viparc_data_quali$week[which((viparc_data_quali$farm==farm_i)&(viparc_data_quali$flock==1))]
     }
 
     weeks_use = c()
     for (w in 1:n_weeks){
-      weeks_use = c(weeks_use, as.numeric(sum(as.numeric(viparc_data[which((viparc_data$farm == farm_i)&(viparc_data$flock == 1)&(viparc_data$week == w)),(10:53)])) != 0))
+      weeks_use = c(weeks_use, as.numeric(sum(as.numeric(viparc_data_quali[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == 1)&(viparc_data_quali$week == w)),(10:53)])) != 0))
     }
     ab_expo[i,] = weeks_use
   }
@@ -257,6 +271,36 @@ As colistin resistance data is not fully available yet, we simulate colistin res
 
 We present in the following different models possible to analyze this data.
 
+### Simple analysis
+
+```{r}
+tab = data.frame("end_start" = obs[1:11,3]-obs[1:11,1], "mid_start" = obs[1:11,2]-obs[1:11,1], "end_mid" = obs[1:11,3]-obs[1:11,2], "abs_amu_tot" = rowSums(ab_expo[1:11,], na.rm=T))
+
+tab$prop_expo_mid_start = rep(NA, nrow(tab))
+tab$prop_expo_end_start = rep(NA, nrow(tab))
+tab$prop_expo_end_mid = rep(NA, nrow(tab))
+for (i in 1:nrow(tab)){
+  
+  if(is.finite(weeks_samp[i,2])){
+    tab$prop_expo_mid_start[i] = sum(ab_expo[i,1:weeks_samp[i,2]])/sum(is.finite(ab_expo[i,1:weeks_samp[i,2]]))
+  } 
+  
+  if(is.finite(weeks_samp[i,3])){
+    tab$prop_expo_end_start[i] = sum(ab_expo[i,1:weeks_samp[i,3]])/sum(is.finite(ab_expo[i,1:weeks_samp[i,3]]))
+  }
+  
+  if((is.finite(weeks_samp[i,3])) & (is.finite(weeks_samp[i,2]))){
+    tab$prop_expo_end_mid[i] = sum(ab_expo[i,(weeks_samp[i,2]+1):weeks_samp[i,3]])/sum(is.finite(ab_expo[i,(weeks_samp[i,2]+1):weeks_samp[i,3]]))
+  }
+}
+
+summary(lm(data=tab, mid_start ~ prop_expo_mid_start))
+summary(lm(data=tab, end_start ~ prop_expo_end_start))
+summary(lm(data=tab, end_mid ~ prop_expo_end_mid))
+
+rm(i)
+```
+
 ## Model 1: Global resistance on farm (deterministic)
 
 In this simple model, we study the global microbiote on farm, and consider the variable $R(t)$ representing the proportion of bacteria presenting a colistin resistance phenotype in a farm f. As sums of proportions of sensitive and resistant bacteria is 1, we only focus on the proportion of resistant bacteria.
@@ -283,6 +327,17 @@ eq_mod=function(t, R, param){
   
   return(list(dR))
 }
+
+eq_mod=function(t, R, param){
+  alpha = param[[1]]
+  A = param[[2]]
+  ab_expo_farm = param[[3]]
+  
+  dR = 1 - (1 + A * (alpha ^ ab_expo_farm[t])) * R
+  
+  return(list(dR))
+}
+
 ```
 
 ### Simulated "observed" colistin resistance data (for the `case_amu` $\neq$ 1)
@@ -300,7 +355,7 @@ if(case_amu != 1){
 ```{r}
 if(case_amu != 1){
   alpha_true = 0.2
-  A_true = 2
+  A_true = 5
 }
 ```
 
@@ -461,12 +516,13 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 }
 ```
 
-We plot observations (red dots) and model predictions (black line and CI) for `farms_plot` farms (including 2 farms using colistin): farms 1, 2, 16, 17.
+We plot observations (red dots) and model predictions (black line and CI) for `farms_plot` farms.
 
-AMU is represented as blue bars.
+AMU is represented as blue bars. We can plot the qualitative use (yes/no each week), or the quantitative use (what amount per kg of chicken each week). In the latter case, the quantity in case several antibiotics are used at the same time must be clearly defined in `ab_expo_quanti`.
 
 ```{r}
 farms_plot = 1:11
+amu_quanti = F
 ```
 
 ```{r warning=F}
@@ -491,11 +547,20 @@ for (f in 1:n_cyc){
   
   pred_vs_obs$pred_sup[which((pred_vs_obs$farm==f) & (pred_vs_obs$week %in%(1:n_weeks_farm)))] = qbeta(p=0.975, shape1=fit_coef[3], shape2=fit_coef[3]*(1.00001-predict_farm)/(predict_farm+0.00001))
 
-  pred_vs_obs$exp_ab[which(pred_vs_obs$farm == f)] = ab_expo[f,]
+  if(amu_quanti){
+    pred_vs_obs$exp_ab[which(pred_vs_obs$farm == f)] = ab_expo_quanti[f,]
+  }else{
+    pred_vs_obs$exp_ab[which(pred_vs_obs$farm == f)] = ab_expo[f,]
+  }
   
   rm(predict_farm)
 }
+
 pred_vs_obs$exp_ab[pred_vs_obs$exp_ab == 0] = NA
+if(amu_quanti){
+  pred_vs_obs$exp_ab[which(pred_vs_obs$exp_ab > quantile(pred_vs_obs$exp_ab, probs=0.9, na.rm=T))] = quantile(pred_vs_obs$exp_ab, probs=0.9, na.rm=T)
+}
+
 rm(f, n_weeks_farm, n_samp_farm)
 
 pl = list()
@@ -503,15 +568,22 @@ iter_list = 0
 for (far in farms_plot){
   iter_list = iter_list + 1
   p = ggplot(data=pred_vs_obs[which(pred_vs_obs$farm==far),], aes(x=week)) + xlab("Time (weeks)") + ylab("Prop. of resistant colonies R(t)") + ggtitle(paste0("Farm ",far))
-  p = p + ylim(0,1)
   p = p + geom_ribbon(aes(ymin=pred_inf, ymax=pred_sup), color="black", alpha=1/4, fill="#E69F00")
   p = p + geom_line(aes(y=pred_val), col="black", size=1)
   p = p + geom_point(aes(y = obs), size = 3, shape = 21,  fill = "red", color = "black")
-  p = p + geom_rect(aes(xmin=week*exp_ab-0.5, xmax=week*exp_ab+0.5, ymin=0.97, ymax=1), fill="blue")
+  
+  if(amu_quanti){
+    p = p + ylim(0,1+max(pred_vs_obs$exp_ab, na.rm=T))
+    p = p + geom_rect(aes(xmin=week*(exp_ab>0)-0.5, xmax=week*(exp_ab>0)+0.5, ymin=0.97, ymax=1+exp_ab), fill="blue", col=NA)
+  }else{
+    p = p + ylim(0,1)
+    p = p + geom_rect(aes(xmin=week*exp_ab-0.5, xmax=week*exp_ab+0.5, ymin=0.97, ymax=1), fill="blue", col=NA)
+  }
+  
   pl[[iter_list]] = p
 }
 multiplot(plotlist=pl, cols=3)
-rm(far, farms_plot, iter_list, p, pl)
+rm(far, iter_list, p, pl)
 ```
 
 
@@ -864,7 +936,7 @@ mod_rateFunc <- function(state, parameters, t) {
   t_day = max(ceiling(t), 1)
   
   return(c(
-    (alpha ^ ab_expo_f[t_day]) * beta * S * R / N,
+    (alpha ^ ab_expo_f[t_day]) * beta * S * R / max(N,1),
     gamma * R,
     nu * S,
     nu * R
@@ -875,7 +947,7 @@ pred_mod_3 = function(farm, param){
   beta = param[[1]]
   gamma = param[[2]]
   alpha = param[[3]]
-  nu = param[[4]]
+  nu = 0 #param[[4]]
   eta = param[[5]]
   pS = param[[6]] # Proportion of resistant bacteria in "S" chickens
   pR = param[[7]] # Proportion of resistant bacteria in "R" chickens
@@ -892,15 +964,60 @@ pred_mod_3 = function(farm, param){
   pred_S = approx(x = pred_ev$time, y = pred_ev$S, xout = 1:n_weeks_farm, method = "constant")
   pred_R = approx(x = pred_ev$time, y = pred_ev$R, xout = 1:n_weeks_farm, method = "constant")
 
+  # Number of chickens in the farm:
+  pred_numb_chi = pred_S$y + pred_R$y
+  
   # Observation process:
   pred_count = rep(NA, n_samp)
   for (w in 1:n_samp_farm){
     pred_count[w] = obs_process_mod3(c(pred_S$y[weeks_samp[farm,w]], pred_R$y[weeks_samp[farm,w]]), list(50, pS, pR))
   }
 
-  return(pred_count)
+  return(list(pred_numb_chi, pred_count))
 }
 ```
+
+We define a function convenient for parameters estimation:
+
+```{r}
+# param_rand = list(0.2, 0.3, 1.1, 0.026, 0.8, 0.2, 0.8)
+
+run_mod3 = function(param){
+  
+  pred_numb_chi = matrix(NA, n_cyc, n_weeks)
+  pred_sampl_dates = matrix(NA, n_cyc, n_samp)
+  
+  for (farm in 1:n_cyc){
+    nsimu=10
+    pred_numb_chi_this_farm = matrix(NA, nsimu, n_weeks)
+    pred_sampl_dates_this_farm = matrix(NA, nsimu, n_samp)
+    for(s in 1:nsimu){
+      pred_this_farm_this_simu = pred_mod_3(farm,as.list(param))
+      
+      pred_numb_chi_this_farm[s,] = c(pred_this_farm_this_simu[[1]], rep(NA, length(pred_numb_chi_this_farm[s,]) - length(pred_this_farm_this_simu[[1]])))
+      
+      pred_sampl_dates_this_farm[s,] = pred_this_farm_this_simu[[2]]
+    }
+    pred_numb_chi[farm,] = colMeans(pred_numb_chi_this_farm, na.rm=T)
+    pred_sampl_dates[farm,] = colMeans(pred_sampl_dates_this_farm, na.rm=T)
+  }
+
+  # to_min_numb_chi = sum((pred_numb_chi-[vecteur avec tailles population observees a chaque semaine])^2, na.rm=T)
+  to_min_sampl_dates = sum((pred_sampl_dates-obs)^2, na.rm=T)
+
+  return(to_min_sampl_dates)
+  # return(list(to_min, pred_sampl_dates))
+}
+
+```
+
+We use "optim" function for point estimates:
+
+```{r}
+fit = optim(par=c(1, 1, 1, 0.01, 1, 0.2, 0.8), fn=run_mod3, lower=rep(0,7), upper=c(5,5,5,1,1,1))
+print(fit$par)
+```
+
 
 ### Evolution of variability with flock size
 
