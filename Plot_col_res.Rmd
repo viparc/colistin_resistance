@@ -1,0 +1,662 @@
+---
+title: "Plotting AMU and colistin resistance"
+csl: the-american-naturalist.csl
+output:
+  html_document:
+    theme: cerulean
+    toc: yes
+  pdf_document:
+    toc: yes
+<!-- bibliography: references.bib -->
+---
+
+<!--
+IMAGES:
+Insert them with: ![alt text](image.png)
+You can also resize them if needed: convert image.png -resize 50% image.png
+If you want to center the image, go through HTML code:
+<div style="text-align:center"><img src ="image.png"/></div>
+
+REFERENCES:
+For references: Put all the bibTeX references in the file "references.bib"
+in the current folder and cite the references as @key or [@key] in the text.
+Uncomment the bibliography field in the above header and put a "References"
+title wherever you want to display the reference list.
+-->
+
+<style type="text/css">
+.main-container {
+  max-width: 1370px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+```{r general_options, include = FALSE}
+knitr::knit_hooks$set(
+  margin = function(before, options, envir) {
+    if (before) par(mgp = c(1.5, .5, 0), bty = "n", plt = c(.105, .97, .13, .97))
+    else NULL
+  },
+  prompt = function(before, options, envir) {
+    options(prompt = if (options$engine %in% c("sh", "bash")) "$ " else "> ")
+  })
+
+knitr::opts_chunk$set(margin = TRUE, prompt = TRUE, comment = "",
+                      collapse = TRUE, cache = FALSE, autodep = TRUE,
+                      dev.args = list(pointsize = 11), fig.height = 3.5,
+                      fig.width = 4.24725, fig.retina = 2, fig.align = "center")
+
+options(width = 137)
+```
+
+The objective is to build a dynamic model allowing to estimate the effect of antimicrobial usage (AMU), particularly colistin, on colistin resistance in ViParc chicken farms. Available data is:
+
+* Data on ViParc farms, including AMU and sampling dates: [ViParc data overview](https://rpubs.com/choisy/viparc_data).
+* During each production cycle, 3 (or less) pooled chicken faeces samples are collected: at the beginning, in the middle and at the end of the cycle. Each pooled sample is believed to represent the faeces of around 50 individual chickens at the sampling day (no matters the farm size). The proportion of colonies of each  sample that are colistin resistant is determined.
+
+We first clean work environment and load needed packages.
+
+```{r}
+# rm(list=ls(all=TRUE))
+
+# install.packages("deSolve", "bbmle", "ggplot2", "adaptivetau")
+library(deSolve)
+library(bbmle)
+library(ggplot2)
+library(reshape2)
+library(readxl)
+library(pracma)
+```
+
+### Data
+
+We load data:
+
+* `viparc_data_quali` and `viparc_data_quanti`: Includes production cycles, AMU (resp. qualitative and quantitative), sampling dates in ViParc farms.
+* `mic_data`: Proportion of colistin resistant colonies in some of the pooled samples. For now, `mic_data` only includes the proportion of resistance for the initial samples in some of the farms.
+
+```{r, cache=T}
+# viparc_data_quali = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_qualitative.csv")
+# viparc_data_quanti = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_quantitative.csv")
+
+viparc_data_quali = read.csv("C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/viparc_qualitative.csv")
+viparc_data_quanti = read.csv("C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/viparc_quantitative.csv")
+
+mic_data = as.data.frame(read_excel(path="C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/ColR_MIC.xlsx", sheet="MIC data"))
+mic_data$MIC = as.numeric(mic_data$MIC)
+mic_data = dcast(mic_data, ID + FarmID + Flockseq ~ SamplingPoint, value.var="MIC")
+mic_data = mic_data[, c("ID", "FarmID", "Flockseq", "Start", "Mid", "End")]
+
+gcur = as.data.frame(read_excel(path="C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/ColR_MIC.xlsx", sheet="OD"))
+
+```
+
+First, we use `gcur_data`, that contains the growth curves, to compute the area under curve (AUC) at concentration 4, between 15 and 70 minutes, for each sample:
+
+```{r}
+gcur = melt(gcur, id.vars = c("SampleID", "Conc.", "FlockID", "SamplPoint", "Repeat"), variable.name = "Time")
+gcur$Time = as.numeric(gcur$Time)
+
+# gcur = gcur[which(!gcur$Conc. %in% c(3, 6)),]
+gcur = gcur[which(gcur$Conc. == 4),]
+
+gcur = dcast(gcur, SampleID + Conc. + FlockID + SamplPoint + Time ~ Repeat, value.var="value")
+gcur$od = (gcur$`1` + gcur$`2`)/2
+gcur = gcur[,c("SampleID", "Conc.", "FlockID", "SamplPoint", "Time", "od")]
+
+auc_ob = matrix(NA, nrow = length(unique(gcur$FlockID)), ncol = length(unique(gcur$SamplPoint)))
+dimnames(auc_ob) = list(unique(gcur$FlockID), c("S", "M", "E"))
+for(flo in unique(gcur$FlockID)){
+  for(sp in unique(gcur$SamplPoint)){
+    if(length(15:70) == length(gcur$od[which((gcur$Time %in% (15:70)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])){
+      auc_ob[flo, sp] = trapz(x = 15:70, y = gcur$od[which((gcur$Time %in% (15:70)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])
+    }else{
+      print(paste0("Impossible to compute area under curve for flock ", flo, ", sampling point ", sp))
+    }
+  }
+}
+
+auc_ob = (auc_ob - min(auc_ob, na.rm=T))/(max(auc_ob, na.rm=T) - min(auc_ob, na.rm=T))
+
+auc_ob = auc_ob[which(! rownames(auc_ob) %in% c("0351", "0381", "0391", "0765")),]
+mic_data = mic_data[which(! mic_data$ID %in% c("0351", "0381", "0391", "0765")),]
+
+```
+
+AMU data is actually observed in the study and not simulated. We create a matrix containing binary information on AMU (antimicrobial used / not used) for each week (columns) of the production cycle and for each farm (rows): `ab_expo`. We use real MIC measures for selected farms, and real cycle lengths.
+
+We specify the antibiotics in which we want to include AMU:
+
+```{r}
+display_only_col = F
+
+all_other_ab = colnames(viparc_data_quali)[10:54]
+if(display_only_col){
+  oth_ab_inc_amu = "unknown_use"
+}else{
+  oth_ab_inc_amu = all_other_ab#[! all_other_ab %in% c("colistin_use", "unknown_use")]
+}
+
+rm(all_other_ab)
+```
+
+We define `n_cyc` and `mic_ob_init_true` (MIC in the initial samples) depending on the case chosen:
+
+```{r}
+n_samp = 3
+n_cyc = nrow(mic_data)
+
+mic_ob_init_true = mic_data$Start
+
+mic_ob = matrix(NA, n_cyc, n_samp)
+
+mic_ob[,1] = mic_ob_init_true
+mic_ob[,c(2,3)] = cbind(mic_data$Mid, mic_data$End)
+names(mic_ob_init_true) = rownames(mic_ob) = mic_data$ID
+
+```
+
+We calculate `col_expo`, `col_expo_quanti`, `ab_oth_expo`, `ab_oth_expo_quanti`, `weeks_samp` (week of samplings for each cycle included), and `init_flock_size` (initial flock size for each cycle included):
+
+```{r}
+col_expo = ab_oth_expo = matrix(NA, n_cyc, max(viparc_data_quali$week))
+col_expo_quanti = ab_oth_expo_quanti = matrix(NA, n_cyc, max(viparc_data_quanti$week))
+weeks_samp = matrix(NA, n_cyc, n_samp)
+init_flock_size = rep(NA, n_cyc)
+rownames(col_expo) = rownames(col_expo_quanti) = rownames(ab_oth_expo) = rownames(ab_oth_expo_quanti) = rownames(weeks_samp) = names(init_flock_size) = mic_data$ID
+
+for(i in 1:n_cyc){
+  farm_i = as.character(mic_data$FarmID[i])
+  flockseq_i = as.character(mic_data$Flockseq[i])
+  
+  if(!(any(viparc_data_quali$completed[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i))]) == T)){
+    print(paste0("For farm ",farm_i,", flock sequence ",flockseq_i,", the production cycle was not completed"))
+  }
+  
+  # Colistin use (qualitative and quantitative):
+  
+  weeks_col_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali[,"colistin_use"] == T))]
+  weeks_col_no_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali[,"colistin_use"] == F))]
+  
+  col_expo[i, weeks_col_use] = 1
+  col_expo[i, weeks_col_no_use] = col_expo_quanti[i, weeks_col_no_use] = 0
+  
+  for(wk in weeks_col_use){
+    col_expo_quanti[i, wk] = 1000 * sum(viparc_data_quanti[which((viparc_data_quanti$farm == farm_i)&(viparc_data_quanti$flock == flockseq_i)&(viparc_data_quanti$week == wk)), which(colnames(viparc_data_quali) == "colistin_use")])
+  }
+  
+  # Other AB use (qualitative and quantitative):
+  
+  if(length(oth_ab_inc_amu) > 1){
+    
+    weeks_othab_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(rowSums(viparc_data_quali[,oth_ab_inc_amu], na.rm=T) !=0))]
+    weeks_othab_no_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(rowSums(viparc_data_quali[,oth_ab_inc_amu], na.rm=T) ==0))]
+    
+  }else if(length(oth_ab_inc_amu) == 1){
+    
+    weeks_othab_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali[,oth_ab_inc_amu] == T))]
+    weeks_othab_no_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali[,oth_ab_inc_amu] == F))]
+
+  }
+  
+  ab_oth_expo[i, weeks_othab_use] = 1
+  ab_oth_expo[i, weeks_othab_no_use] = ab_oth_expo_quanti[i, weeks_othab_no_use] = 0
+  
+  for(wk in weeks_othab_use){
+    ab_oth_expo_quanti[i, wk] = 1000 * sum(viparc_data_quanti[which((viparc_data_quanti$farm == farm_i)&(viparc_data_quanti$flock == flockseq_i)&(viparc_data_quanti$week == wk)), which(colnames(viparc_data_quali) %in% oth_ab_inc_amu)])
+  }
+  
+  # Weeks of sampling:
+  
+  weeks_samp[i,] = c(viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali$sampling == T))], rep(NA, n_samp))[1:n_samp]
+  
+  # Initial flock size:
+  
+  init_flock_size[i] = viparc_data_quali$nb_chicken[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali$week == 1))]
+}
+
+weeks_to_keep = which((colSums(!is.na(col_expo)) != 0) & (colSums(!is.na(ab_oth_expo)) != 0))
+
+col_expo = col_expo[,weeks_to_keep]
+col_expo_quanti = col_expo_quanti[,weeks_to_keep]
+ab_oth_expo = ab_oth_expo[,weeks_to_keep]
+ab_oth_expo_quanti = ab_oth_expo_quanti[,weeks_to_keep]
+
+n_weeks = max(weeks_to_keep)
+
+if(any(col_expo != (col_expo_quanti !=0), na.rm=T) | any(ab_oth_expo != (ab_oth_expo_quanti !=0), na.rm=T)){print("ERROR: Qualitative and quantitative AMU data are not consistent.")}
+
+rm(i, wk, weeks_col_use, weeks_col_no_use, weeks_othab_use, weeks_othab_no_use, farm_i, flockseq_i, weeks_to_keep)
+
+```
+
+We plot the AMU and sampling dates for the `n_cyc` farms. This allows to visually assess if AMU occurs shortly before sampling.
+
+```{r}
+plot(x=c(0,0.1), y=c(0,0), xlim=c(0,ncol(col_expo)), ylim=c(0,n_cyc+10), type="l", xlab="Weeks", ylab="Farms")
+for (i in 1:n_cyc){
+  for (j in 1:ncol(col_expo)){
+    
+    if ((!(is.na(col_expo[i,j]))) & (col_expo[i,j] == 1) & (ab_oth_expo[i,j] == 1)){
+      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "green", border="green")
+    }else if ((!(is.na(col_expo[i,j]))) & (col_expo[i,j] == 0) & (ab_oth_expo[i,j] == 1)){
+      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "blue", border="blue")
+    }else if ((!(is.na(col_expo[i,j]))) & (col_expo[i,j] == 1) & (ab_oth_expo[i,j] == 0)){
+      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "red", border="red")
+    }else if ((!(is.na(col_expo[i,j]))) & (col_expo[i,j] == 0) & (ab_oth_expo[i,j] == 0)){
+      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "bisque", border="bisque")
+    }
+    
+    if (any(weeks_samp[i,] == j, na.rm=T)){
+      rect(xleft = j-0.1, xright = j+0.1, ybottom = i-0.5, ytop = i+0.5, col = "black", border="black")
+    }
+  }
+  lines(x = c(0, ncol(col_expo)), y = c(i-0.5, i-0.5))
+}
+rm(i,j)
+legend(x=1, y=n_cyc+10, legend=c("Colistin use only", "Other AB use only", "Both colistin and other AB use", "No AMU"), fill=c("red", "blue", "green", "bisque"), cex = 0.8, ncol=3)
+
+```
+
+### Simple analysis
+
+```{r}
+# nwkseff=2; quantuse=T; tempo_amu="exp_decay"; thresh=0.4; logtrans=F; ignore.nul=F; decay_init=0; obj="plot"
+
+aucamu = function(nwkseff=2, quantuse=T, tempo_amu="exp_decay", thresh=0.4, logtrans=F, ignore.nul=F, decay_init=0, obj="plot"){
+  obtab = data.frame(cycle = NA, amu = NA, auc = NA, age=NA, init=NA, prev=NA, exp.init=NA)
+  for(cyc_i in 1:n_cyc){
+    for(time_i in 2:3){
+      
+      if(weeks_samp[cyc_i, time_i] - nwkseff < 1){
+        # print(paste0("For cycle ", cyc_i, ", sampling time ", time_i, ", the number of weeks entered for the historic of use (", nwkseff, ") is more important than the number of past production weeks. The total past use is calculated."))
+      }
+      
+      inc_wks = max(1, (weeks_samp[cyc_i, time_i] - nwkseff)):(weeks_samp[cyc_i, time_i] - 1)
+      
+      if(quantuse){
+        if(logtrans){
+          datamu = log(ab_oth_expo_quanti[cyc_i, inc_wks])
+          datamu[! is.finite(datamu)] = NA
+        }else{
+          datamu = ab_oth_expo_quanti[cyc_i, inc_wks]
+        }
+      }else{
+        datamu = ab_oth_expo[cyc_i, inc_wks]
+      }
+      
+      if(tempo_amu == "step"){
+        usemetr = sum(datamu, na.rm=T)
+      }else if(tempo_amu == "linear"){
+        time_eff = seq(0, 1, length.out = nwkseff+1)
+        usemetr = sum(datamu*tail(time_eff, length(datamu)), na.rm=T)
+      }else if(tempo_amu == "exp_decay"){
+        time_eff = (exp(-log(100)/nwkseff))^seq(nwkseff, 0, -1)
+        usemetr = sum(datamu*tail(time_eff, length(datamu)), na.rm=T)
+      }
+      
+      exp_init = auc_ob[cyc_i, 1] * (1 - decay_init)^(weeks_samp[cyc_i, time_i] -1)
+      
+      obtab = rbind(obtab, c(cyc_i, usemetr, auc_ob[cyc_i, time_i], weeks_samp[cyc_i, time_i], auc_ob[cyc_i, 1], auc_ob[cyc_i, time_i-1], exp_init))
+    }
+  }
+  obtab = obtab[-1,]
+  
+  if(ignore.nul){
+    obtab = obtab[which(obtab$amu != 0),]
+  }
+  obtab$cycle = as.factor(obtab$cycle)
+  
+  obtab$res = obtab$auc >= thresh
+  
+  if(obj == "plot"){
+    p = ggplot(data=obtab, aes(x=amu, y=auc, col=exp.init))
+    p = p + xlab("All antibiotics use metric") + ylab("Area under curve")
+    p = p + ggtitle(paste0("Pearson correlation: ", round(cor(obtab$amu, obtab$auc, use="complete.obs"), 3), " (", nrow(na.omit(obtab)), " complete observations, including ", round(sum(obtab$auc >= thresh, na.rm=T)*100/nrow(na.omit(obtab))), "% above threshold)"))
+    p = p + geom_point()
+    p = p + geom_hline(yintercept = thresh, linetype="dashed", col="grey")
+    p = p + scale_color_gradient(low = "red", high = "blue")
+    # p = ggplotly(p)
+    return(p)
+  }else if(obj == "est"){
+    return(obtab)
+  }
+}
+
+```
+
+Shiny interface:
+
+```{r}
+library(shiny)
+
+ui <- fluidPage({
+  titlePanel("Correlation between past use and AUC")
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("nwkseff",
+                  "Number of weeks of past use to take into account:",
+                  min=1,
+                  max=25,
+                  value=5),
+      sliderInput("thresh",
+                  "Threshold value for AUC:",
+                  min=0,
+                  max=1,
+                  value=0.5),
+      selectInput("tempo_amu",
+                  "Temporal effect of AMU:",
+                  c("exp_decay", "linear", "step")),
+      selectInput("quantuse",
+                  "Select if the quantitative AMU should be used:",
+                  c(T, F)),
+      selectInput("logtrans",
+                  "Select if the quantitative AMU should be log transformed:",
+                  c(F, T)),
+      selectInput("ignore.nul",
+                  "Select if the nul values of use should be ignored:",
+                  c(T, F)),
+      sliderInput("decay_init",
+                  "Value for decay from initial value:",
+                  min=0,
+                  max=1,
+                  value=0.5)
+
+    ),
+    
+    mainPanel(
+      plotOutput("plotdisp")
+    )
+  )
+})
+
+server <- function(input, output){
+  # define the output, the output id must be the same with the ID in the UI object
+  # because the output change as the input change - it's dynamic so we need a special function renderPlot() to make the output react with our choice
+  
+  output$plotdisp <- renderPlot({
+    # filter the data by the input and save into new object
+    # the input id must be the same as the UI object
+    # plot
+    aucamu(nwkseff=input$nwkseff, quantuse=input$quantuse, tempo_amu=input$tempo_amu, thresh=input$thresh, logtrans=input$logtrans, ignore.nul=input$ignore.nul, decay_init=input$decay_init)
+  })
+}
+```
+
+```{r}
+shinyApp(ui=ui, server=server)
+
+```
+
+
+### Model:
+
+```{r}
+run1 = function(param, aim){
+  alpha = param[1]
+  beta = param[2]
+  gamma = param[3]
+  epsilon = param[4] #sigmoid(param[4])
+  tau = param[5]
+  mu = param[6]
+  
+  obstab = aucamu(nwkseff=beta, quantuse=T, tempo_amu="exp_decay", thresh=tau, logtrans=F, ignore.nul=F, decay_init=epsilon, obj="est")
+  
+  full = glm(res ~ ., data=obstab[,c("amu", "res", "age", "exp.init")], family = "binomial")
+  null = glm(res ~ 1, data=obstab[,c("amu", "res", "age", "exp.init")], family = "binomial")
+  final_mod = step(null,  scope=list(lower=null, upper=full), direction="both", criterion = "AIC", trace=F)
+  AIC_best_model = tail(final_mod$anova$AIC, 1)
+  var_included_best_model = paste(names(final_mod$coefficients)[-1], collapse="; ")
+  pval_var_best_model = paste(round(summary(final_mod)$coefficients[-1,4], 3), collapse = "; ")
+  refAIC = final_mod$anova$AIC[1]
+  
+  # pred = alpha*obstab$amu + gamma*obstab$exp.init
+  
+  # randmat = mu + eta * sapply(X = rep(NA, 100), FUN = function(p) rbinom(length(pred), 1, nu))
+  # pred = pred + randmat
+  
+  # to_min = sum((obstab$auc - rowMeans(pred))^2, na.rm=T)
+  
+  if(aim == "est"){
+    return(to_min)
+  }else if(aim == "pred"){
+    return(obstab)
+  }else if(aim == "visu"){
+    return(list(AIC_best_model, var_included_best_model, pval_var_best_model, refAIC))
+  }
+}
+```
+
+```{r}
+tabplot = data.frame(beta = NA, epsilon = NA, aic = NA, var = NA, pval = NA, ref_aic = NA)
+
+for(bet in 1:20){
+  for(eps in seq(0, 1, 0.1)){
+    val = run1(c(NA, bet, NA, eps, 0.4, NA), aim = "visu")
+    tabplot = rbind(tabplot, c(bet, eps, val[[1]], val[[2]], val[[3]], val[[4]]))
+  }
+}
+tabplot = tabplot[-1,]
+tabplot$beta = as.numeric(tabplot$beta)
+tabplot$epsilon = as.numeric(tabplot$epsilon)
+tabplot$aic = as.numeric(tabplot$aic)
+
+p = ggplot(tabplot, aes(x=epsilon, y=beta))
+p1 = p + geom_tile(aes(fill=var), col="black") + geom_point(data = tabplot[which.min(tabplot$aic),], shape=23, fill="red", size=3) + geom_text(aes(label = pval)) + ggtitle("Covariables included")
+p1
+p2 = p + geom_tile(aes(fill=aic), col="black") + geom_point(data = tabplot[which.min(tabplot$aic),], shape=23, fill="red", size=3) + geom_text(aes(label = pval)) + ggtitle("AIC values")
+p2
+
+```
+
+
+```{r}
+fit = optim(fn=run1, aim = "est", par = rep(0,7))
+print(fit$par)
+obs = run1(fit$par, aim = "pred")[[1]]
+pred = run1(fit$par, aim = "pred")[[2]]
+ggplot() + geom_linerange(aes(x = obs$amu, ymin = apply(pred, 1, quantile, 0.05), ymax = apply(pred, 1, quantile, 0.95)), col="red") + geom_point(aes(x=obs$amu, y=rowMeans(pred)), col="red") + geom_point(data=obs, aes(x=amu, y=auc))
+
+
+```
+
+### Fit
+
+The model is defined:
+
+```{r}
+eq_mod=function(t, R, param){
+  gamma = param[[1]]
+  nu = param[[2]]
+  alpha = param[[3]]
+  A = param[[4]]
+  B = param[[5]]
+  ab_expo_farm = param[[6]]
+
+  Req = alpha * dnorm(ab_expo_farm[t], mean=A, sd=B)
+  # Req = ifelse((ab_expo_farm[t] >= A) & (ab_expo_farm[t] <= B), alpha, 0)
+  dR = (gamma * nu^(Req < R)) * (Req - R)
+
+  return(list(dR))
+}
+
+```
+
+We first define functions with model's parameters as inputs, and as ouput:
+
+* run1: Squared residuals sum
+* run2: Likelihood with residuals drawn in a Gaussian or Beta
+```{r}
+run1 = function(param){
+  gamma = param[1]
+  nu = param[2]
+  alpha = param[3]
+  A = param[4]
+  B = param[5]
+
+  pred_sampl_dates = matrix(NA, n_cyc, n_samp)
+  
+  for (farm in 1:n_cyc){
+    n_weeks_farm = sum(!(is.na(ab_expo[farm,])))
+    n_samp_farm = sum(!(is.na(weeks_samp[farm,])))
+    if(n_samp_farm < 2){print(paste0("CAUTION: For farm ", farm,", the number of samples collected is strictly less than 2"))}
+
+    pred_farm = ode(obs[farm,1], 1:n_weeks_farm, eq_mod, list(gamma, nu, alpha, A, B, ab_expo_quanti[farm,]))[,2]
+    
+    pred_sampl_dates[farm, (1:n_samp_farm)] = pred_farm[weeks_samp[farm,(1:n_samp_farm)]]
+  }
+  rm(farm, pred_farm, n_weeks_farm, n_samp_farm)
+
+  to_min = sum((pred_sampl_dates-obs)^2, na.rm=T)
+
+  return(to_min)
+  # return(list(to_min, pred_sampl_dates))
+}
+
+run2 = function(gamma, nu, alpha, A, B, k){
+
+  pred_sampl_dates = matrix(NA, n_cyc, n_samp)
+  
+  for (farm in 1:n_cyc){
+    n_weeks_farm = sum(!(is.na(ab_expo[farm,])))
+    n_samp_farm = sum(!(is.na(weeks_samp[farm,])))
+    if(n_samp_farm < 2){print(paste0("CAUTION: For farm ", farm,", the number of samples collected is strictly less than 2"))}
+
+    pred_farm = ode(obs[farm,1], 1:n_weeks_farm, eq_mod, list(gamma, nu, alpha, A, B, ab_expo_quanti[farm,]))[,2]
+    
+    pred_sampl_dates[farm, (1:n_samp_farm)] = pred_farm[weeks_samp[farm,(1:n_samp_farm)]]
+  }
+  rm(farm, pred_farm, n_weeks_farm, n_samp_farm)
+
+  # return(-sum(dnorm(x=obs, mean=pred_sampl_dates, sd=k, log=T), na.rm=T))
+  return(-sum(dbeta(x=obs, shape1=k, shape2=k*(1.00001-pred_sampl_dates)/(pred_sampl_dates+0.00001), log=T), na.rm=T))
+}
+```
+
+These functions allow us to perform the parameters estimation.
+
+#### Using "optim" function for point estimates
+
+```{r}
+ab_expo = ab_oth_expo
+ab_expo_quanti = ab_oth_expo_quanti
+obs = auc_ob
+
+# fit = optim(par=c(1,1,1,1,1), fn=run1)
+# print(fit$par)
+# fit_coef = c(fit$par, 10^-5)
+```
+
+#### Using "bbmle" package for point estimates, confidence intervals and likelihood profiles
+
+```{r}
+# fit_mle2 = mle2(minuslogl = run2, start = list(gamma=1, nu=1, alpha=1, A=100, B=1.1, k=10^-5))
+# fit_coef = coef(fit_mle2)
+# print(fit_coef)
+# prof = profile(fit_mle2)
+# plot(prof)
+# conf = confint(fit_mle2)
+# print(conf)
+```
+
+### Plot of observations
+
+We plot observations (red dots) and model predictions (black line and CI) for `farms_plot` farms.
+
+AMU is represented as blue bars. We can plot the qualitative use (yes/no each week), or the quantitative use (what amount per kg of chicken each week). In the latter case, the quantity in case several antibiotics are used at the same time must be clearly defined in `ab_expo_quanti`.
+
+```{r}
+farms_plot = 1:21
+amu_quanti = T
+mic_or_auc = "auc"
+
+```
+
+```{r warning=F}
+if(mic_or_auc == "auc"){
+  to_plot = auc_ob
+}else if(mic_or_auc == "mic"){
+  to_plot = mic_ob
+}
+
+obs_plot = rbind(data.frame(farm=rep(NA, n_cyc*n_weeks), week=rep(NA, n_cyc*n_weeks), obser=rep(NA, n_cyc*n_weeks), exp_ab=rep(NA, n_cyc*n_weeks), type_ab=rep("Colistin", n_cyc*n_weeks), pred_val=rep(NA, n_cyc*n_weeks)),
+                 data.frame(farm=rep(NA, n_cyc*n_weeks), week=rep(NA, n_cyc*n_weeks), obser=rep(NA, n_cyc*n_weeks), exp_ab=rep(NA, n_cyc*n_weeks), type_ab=rep("Other AB", n_cyc*n_weeks), pred_val=rep(NA, n_cyc*n_weeks)))
+
+obs_plot$farm = as.vector(matrix(rep(rownames(to_plot),n_weeks), n_weeks, n_cyc, byrow=T))
+obs_plot$week = rep(seq(1,n_weeks),n_cyc)
+
+for (f in rownames(to_plot)){
+  n_weeks_farm = sum(!(is.na(col_expo[f,])))
+  n_samp_farm = sum(!(is.na(weeks_samp[f,])))
+  if(n_samp_farm < 2){print(paste0("CAUTION: For farm ", f,", the number of samples collected is strictly less than 2"))}
+
+  obs_plot$obser[which((obs_plot$farm==f) & (obs_plot$week %in% weeks_samp[f,(1:n_samp_farm)]))] = to_plot[f, (1:n_samp_farm)]
+  
+    # predict_farm = ode(to_plot[f, 1], 1:n_weeks_farm, eq_mod, list(fit_coef[1], fit_coef[2], fit_coef[3], fit_coef[4], fit_coef[5], ab_expo_quanti[f,]))[,2]
+  
+  # obs_plot$pred_val[which((obs_plot$farm==f) & (obs_plot$week %in%(1:n_weeks_farm)))] = predict_farm
+
+  if(amu_quanti){
+    obs_plot$exp_ab[which((obs_plot$farm == f) & (obs_plot$type_ab == "Colistin"))] = col_expo_quanti[f,]
+    obs_plot$exp_ab[which((obs_plot$farm == f) & (obs_plot$type_ab == "Other AB"))] = ab_oth_expo_quanti[f,]
+
+  }else{
+    obs_plot$exp_ab[which((obs_plot$farm == f) & (obs_plot$type_ab == "Colistin"))] = col_expo[f,]
+    obs_plot$exp_ab[which((obs_plot$farm == f) & (obs_plot$type_ab == "Other AB"))] = ab_oth_expo[f,]
+  }
+  
+  # rm(predict_farm)
+}
+
+# obs_plot$exp_ab[obs_plot$exp_ab == 0] = NA
+
+ratio_mic_quanti_amu = 50
+
+if(amu_quanti){
+  obs_plot$exp_ab[which(obs_plot$exp_ab > (max(to_plot, na.rm=T) * ratio_mic_quanti_amu/2))] = max(to_plot, na.rm=T) * ratio_mic_quanti_amu/2
+}
+
+obs_plot$farm = factor(obs_plot$farm, levels=rownames(to_plot))
+
+rm(f, n_weeks_farm, n_samp_farm)
+
+# Plot:
+
+p = ggplot(data=obs_plot[which(obs_plot$farm %in% rownames(to_plot)[farms_plot]),], aes(x=week))
+p = p + xlab("Time (weeks)")
+
+if(mic_or_auc == "auc"){
+  p = p + ylab("Standardized AUC")
+  p = p + ggtitle("AMU and standardized area under growth curve")
+}else if(mic_or_auc == "mic"){
+  p = p + ylab("Observed MIC")
+  p = p + ggtitle("AMU and MIC for colistin in given cycles")
+}
+
+# p = p + geom_hline(yintercept = 26.1, col="grey", linetype="dashed")
+
+if(amu_quanti){
+  p = p + geom_bar(aes(y=exp_ab/ratio_mic_quanti_amu, fill=type_ab), stat="identity", position="stack", col=NA)
+  
+  p = p + scale_y_continuous(sec.axis = sec_axis(~.*ratio_mic_quanti_amu, name = paste0("AMU (mg/kg) (ceiling ", round(max(to_plot, na.rm=T) * ratio_mic_quanti_amu/2), " mg/kg for each type)")))#, limits=c(0, 0.1+max(to_plot, na.rm=T)))
+  p = p + theme(axis.text.y.right = element_text(color="blue"), axis.title.y.right = element_text(color="blue"))
+
+}else{
+  p = p + geom_bar(aes(y=exp_ab, fill=type_ab), stat="identity", position="stack", col=NA)
+}
+p = p +  scale_fill_discrete(name = "Antibiotics used:")
+
+# p = p + geom_line(aes(y = pred_val))
+p = p + geom_point(aes(y = obser), size = 3, shape = 21,  fill = "red", color = "black")
+
+p = p + facet_wrap(~ farm)
+p
+
+rm(far, iter_list, p, pl)
+```
+
+
+
+
+
