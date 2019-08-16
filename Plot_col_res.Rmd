@@ -262,9 +262,9 @@ legend(x=1, y=n_cyc+10, legend=c("Colistin use only", "Other AB use only", "Both
 ### Simple analysis
 
 ```{r}
-# nwkseff=2; quantuse=T; tempo_amu="exp_decay"; thresh=0.4; logtrans=F; ignore.nul=F; decay_init=0; obj="plot"
+# nwkseff=2; quantuse=T; tempo_amu="exp_decay"; thresh=0.4; logtrans=F; ignore.nul=F; decay_init=0.8; teta=1; delta=6; obj="plot"
 
-aucamu = function(nwkseff=2, quantuse=T, tempo_amu="exp_decay", thresh=0.4, logtrans=F, ignore.nul=F, decay_init=0, obj="plot"){
+aucamu = function(nwkseff=2, quantuse=T, tempo_amu="exp_decay", thresh=0.4, logtrans=F, ignore.nul=F, decay_init=0, teta=1, delta=3, obj="plot"){
   obtab = data.frame(cycle = NA, amu = NA, auc = NA, age=NA, init=NA, prev=NA, exp.init=NA)
   for(cyc_i in 1:n_cyc){
     for(time_i in 2:3){
@@ -285,6 +285,7 @@ aucamu = function(nwkseff=2, quantuse=T, tempo_amu="exp_decay", thresh=0.4, logt
       }else{
         datamu = ab_oth_expo[cyc_i, inc_wks]
       }
+      datamu = datamu * teta^(inc_wks <= delta)
       
       if(tempo_amu == "step"){
         usemetr = sum(datamu, na.rm=T)
@@ -385,7 +386,7 @@ server <- function(input, output){
 ```
 
 ```{r}
-shinyApp(ui=ui, server=server)
+# shinyApp(ui=ui, server=server)
 
 ```
 
@@ -513,28 +514,7 @@ run1 = function(param){
   return(to_min)
   # return(list(to_min, pred_sampl_dates))
 }
-
-run2 = function(gamma, nu, alpha, A, B, k){
-
-  pred_sampl_dates = matrix(NA, n_cyc, n_samp)
-  
-  for (farm in 1:n_cyc){
-    n_weeks_farm = sum(!(is.na(ab_expo[farm,])))
-    n_samp_farm = sum(!(is.na(weeks_samp[farm,])))
-    if(n_samp_farm < 2){print(paste0("CAUTION: For farm ", farm,", the number of samples collected is strictly less than 2"))}
-
-    pred_farm = ode(obs[farm,1], 1:n_weeks_farm, eq_mod, list(gamma, nu, alpha, A, B, ab_expo_quanti[farm,]))[,2]
-    
-    pred_sampl_dates[farm, (1:n_samp_farm)] = pred_farm[weeks_samp[farm,(1:n_samp_farm)]]
-  }
-  rm(farm, pred_farm, n_weeks_farm, n_samp_farm)
-
-  # return(-sum(dnorm(x=obs, mean=pred_sampl_dates, sd=k, log=T), na.rm=T))
-  return(-sum(dbeta(x=obs, shape1=k, shape2=k*(1.00001-pred_sampl_dates)/(pred_sampl_dates+0.00001), log=T), na.rm=T))
-}
 ```
-
-These functions allow us to perform the parameters estimation.
 
 #### Using "optim" function for point estimates
 
@@ -548,16 +528,66 @@ obs = auc_ob
 # fit_coef = c(fit$par, 10^-5)
 ```
 
+
+```{r}
+
+# introd = c(rep(0, 4), 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, rep(0, 10), 1, 0, 0, 1, rep(0, 8), 1, rep(0,3))
+
+run2 = function(aim="est", mu, gamma, alpha, teta, delta, beta, eta, introd=introd){ #, lambda){
+
+  mu = sigmoid(mu)
+  gamma = gamma
+  alpha = alpha
+  teta = exp(teta) +1
+  delta = 10 * sigmoid(delta) +1
+  beta = 10 * sigmoid(beta) +1
+  eta = sigmoid(eta)
+    # lambda = sigmoid(lambda)
+
+  if (aim == "pred"){
+    print(c(mu, gamma, alpha, teta, delta, beta, eta)) #, lambda))
+  }
+  
+  obsdat = aucamu(nwkseff=beta, quantuse=T, tempo_amu="exp_decay", thresh=0.4, logtrans=F, ignore.nul=F, decay_init=0, teta=teta, delta=delta, obj="est")
+  obsdat$introd = introd
+  
+  predmod = mu + alpha * obsdat$amu + eta * obsdat$introd + gamma * obsdat$init #+ lambda^(obsdat$age <= delta)
+
+  if(aim == "est"){
+    return(-sum(dnorm(x=obsdat$auc, mean=predmod, sd=Sd, log=T), na.rm=T))
+    # return(-sum(dbeta(x=obsdat$auc, shape1=shape, shape2=shape*(1.00001-predmod)/(predmod+0.00001), log=T), na.rm=T))
+  }else if (aim == "pred"){
+    return(list(obs = obsdat$auc, pred = predmod, minll = -sum(dnorm(x=obsdat$auc, mean=predmod, sd=Sd, log=T), na.rm=T)))
+  }
+}
+```
+
+
 #### Using "bbmle" package for point estimates, confidence intervals and likelihood profiles
 
 ```{r}
-# fit_mle2 = mle2(minuslogl = run2, start = list(gamma=1, nu=1, alpha=1, A=100, B=1.1, k=10^-5))
+Sd = 0.15
+fit_mle2 = mle2(minuslogl = run2, start = list(mu = logit(runif(1)), gamma = runif(1), alpha = runif(1), teta = log(runif(1)), delta = logit(runif(1)), beta = logit(runif(1)), eta = logit(runif(1)))) #, lambda = logit(runif(1)))
+
 # fit_coef = coef(fit_mle2)
 # print(fit_coef)
 # prof = profile(fit_mle2)
 # plot(prof)
 # conf = confint(fit_mle2)
 # print(conf)
+
+obs_vs_pred = run2(aim="pred", mu=coef(fit_mle2)[1], gamma=coef(fit_mle2)[2], alpha=coef(fit_mle2)[3], teta=coef(fit_mle2)[4], delta=coef(fit_mle2)[5], beta=coef(fit_mle2)[6], eta=coef(fit_mle2)[7]) #, lambda=coef(fit_mle2)[8])
+
+minll = obs_vs_pred[[3]]
+obs_vs_pred = data.frame(obs = obs_vs_pred[[1]], pred = obs_vs_pred[[2]])
+p = ggplot(obs_vs_pred, aes(x = obs, y = pred))
+p = p + xlab("Obs") + ylab("Pred")
+p = p + ggtitle(paste0("Observed VS Predicted AUC (minus LogLikelihood =", round(minll, 2), ")"))
+p = p + geom_segment(aes(xend = obs, y = pmax(0, obs_vs_pred[[2]] - 1.96*Sd), yend = pmin(1, obs_vs_pred[[2]] + 1.96*Sd)), col = "grey")
+p = p + geom_abline(intercept = 0, slope = 1, linetype = "dashed")
+p = p + geom_point(aes(col = as.logical(c(rep(0, 4), 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, rep(0, 10), 1, 0, 0, 1, rep(0, 8), 1, rep(0,3))))) + labs(col = "Introduction")
+p
+
 ```
 
 ### Plot of observations

@@ -4,12 +4,12 @@ dat = na.omit(dat)
 
 # E-step:
 
-e.step <- function(dat, params, type_mod, sigma = 0.1) {
+e.step <- function(dat=dat, params, type_mod, sigma = 0.15) {
 
-  lin_intro = params[["mu"]] + params[["alpha"]] * dat$amu + params[["gamma"]] * dat$init + params[["eta"]]
-  lin_nointro = params[["mu"]] + params[["alpha"]] * dat$amu + params[["gamma"]] * dat$init
-  
   if(type_mod == "logistic"){
+    
+    lin_intro = params[["mu"]] + params[["alpha"]] * dat$amu + params[["gamma"]] * dat$init + params[["eta"]]
+    lin_nointro = params[["mu"]] + params[["alpha"]] * dat$amu + params[["gamma"]] * dat$init
     
     lin_intro = pmin(200, lin_intro)
     lin_nointro = pmin(200, lin_nointro)
@@ -35,6 +35,9 @@ e.step <- function(dat, params, type_mod, sigma = 0.1) {
     
   }else if(type_mod == "linear"){
     
+    lin_intro = params[["mu"]] + params[["alpha"]] * dat$amu + params[["gamma"]] * dat$init + params[["eta"]]
+    lin_nointro = params[["mu"]] + params[["alpha"]] * dat$amu + params[["gamma"]] * dat$init
+    
     r_intro = abs(lin_intro - dat$auc) # residuals
     r_nointro = abs(lin_nointro - dat$auc)
     
@@ -50,6 +53,27 @@ e.step <- function(dat, params, type_mod, sigma = 0.1) {
 
     introd = rbinom(n = length(prob_intro), size = 1, prob = prob_intro)
     introd = as.logical(introd)
+    
+  }else if(type_mod == "linear2"){
+    
+    lin_intro = run2(introd=1, aim="pred", mu=params[["mu"]], gamma=params[["gamma"]], alpha=params[["alpha"]], teta=params[["teta"]], delta=params[["delta"]], beta=params[["beta"]], eta=params[["eta"]])[["pred"]]
+    lin_nointro = run2(introd=0, aim="pred", mu=params[["mu"]], gamma=params[["gamma"]], alpha=params[["alpha"]], teta=params[["teta"]], delta=params[["delta"]], beta=params[["beta"]], eta=0)[["pred"]]
+    
+    r_intro = abs(lin_intro - dat$auc) # residuals
+    r_nointro = abs(lin_nointro - dat$auc)
+    
+    exp_intro = exp(- r_intro^2/sigma^2)
+    exp_nointro = exp(- r_nointro^2/sigma^2)
+    
+    exp_intro = pmin(0.9999, exp_intro)
+    exp_intro = pmax(0.0001, exp_intro)
+    exp_nointro = pmin(0.9999, exp_nointro)
+    exp_nointro = pmax(0.0001, exp_nointro)
+    
+    prob_intro <- exp_intro / (exp_intro + exp_nointro)
+    
+    introd = rbinom(n = length(prob_intro), size = 1, prob = prob_intro)
+    introd = as.logical(introd)
   }
 
   return(introd)
@@ -57,33 +81,61 @@ e.step <- function(dat, params, type_mod, sigma = 0.1) {
 
 # M-step:
 
-m.step <- function(dat, introd, type_mod) {
-  dat_intr = dat
-  dat_intr$intro = introd
+m.step <- function(dat=dat, introd, type_mod) {
   
-  prop_intro = sum(dat_intr$intro)/length(dat_intr$intro)
+  prop_intro = sum(introd)/length(introd)
   
   if(type_mod == "logistic"){
     
-    modstep = glm(data = dat_intr, res ~ amu + init + intro, family="binomial")
+    dat_intr = dat
+    dat_intr$intro = introd
+    
+    modstep = glm(data = dat_intr, res ~ amu + init + intro)
     llmod = as.numeric(logLik(modstep))
     
+    est_param = as.list(c(summary(modstep)$coefficients[,"Estimate"]))
+    if(length(est_param) < 4){est_param[[4]] = 0}
+    
+    est_param = c(est_param, prop_intro)
+    names(est_param) = c("mu", "alpha", "gamma", "eta", "p_intro")
+    
   }else if(type_mod == "linear"){
+    
+    dat_intr = dat
+    dat_intr$intro = introd
+    
     modstep = lm(data = dat_intr, auc ~ amu + init + intro)
     llmod = as.numeric(logLik(modstep))
+    
+    est_param = as.list(c(summary(modstep)$coefficients[,"Estimate"]))
+    if(length(est_param) < 4){est_param[[4]] = 0}
+    
+    est_param = c(est_param, prop_intro)
+    names(est_param) = c("mu", "alpha", "gamma", "eta", "p_intro")
+    
+  }else if(type_mod == "linear2"){
+    
+    Sd = 0.15
+    fit_mle2 = mle2(minuslogl = run2, introd=introd, start = list(mu = logit(runif(1)), gamma = runif(1), alpha = runif(1), teta = log(runif(1)), delta = logit(runif(1)), beta = logit(runif(1)), eta = logit(runif(1))))
+    fit_coef = coef(fit_mle2)
+    
+    fit_coef[1] = sigmoid(fit_coef[1])
+    fit_coef[4] = exp(fit_coef[4]) +1
+    fit_coef[5] = 10 * sigmoid(fit_coef[5]) +1
+    fit_coef[6] = 10 * sigmoid(fit_coef[6]) +1
+    fit_coef[7] = sigmoid(fit_coef[7])
+    
+    est_param = c(fit_coef, p_intro = prop_intro)
+    modstep = fit_mle2
+    llmod = run2(aim="pred", mu=fit_coef[1], gamma=fit_coef[2], alpha=fit_coef[3], teta=fit_coef[4], delta=fit_coef[5], beta=fit_coef[6], eta=fit_coef[7])[[3]]
   }
-  
-  est_param = as.list(c(summary(modstep)$coefficients[,"Estimate"]))
-  if(length(est_param) < 4){est_param[[4]] = 0}
-  est_param = c(est_param, prop_intro)
-  names(est_param) = c("mu", "alpha", "gamma", "eta", "p_intro")
   
   return(list(est_param, llmod, modstep))
 }
 
 # Algo:
 
-em.2lines <- function(dat, tol=1e-6, max.step=1e3, type_mod, init_params = list(mu = runif(1), alpha = runif(1), gamma = runif(1), eta = runif(1), p_intro = runif(1))) {
+em.2lines <- function(dat=0, tol=1e-6, max.step=1e3, type_mod, init_params = list(mu = runif(1), alpha = runif(1), gamma = runif(1), eta = runif(1), p_intro = runif(1))) {
   step = 0
   loglik = 10^6
   
@@ -126,7 +178,7 @@ print(paste0("Loglikelihood:", results[[4]]))
 
 # Plot results:
 
-dat_intr = dat
-dat_intr$intro = results[[3]]
-
-ggplot(dat_intr, aes(x=amu, y=auc, col=intro, shape=res)) + geom_point()
+# dat_intr = dat
+# dat_intr$intro = results[[3]]
+# 
+# ggplot(dat_intr, aes(x=amu, y=auc, col=intro, shape=res)) + geom_point()
