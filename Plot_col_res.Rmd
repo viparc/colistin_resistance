@@ -301,7 +301,7 @@ n_weeks = max(weeks_to_keep)
 
 if(any(col_expo != (col_expo_quanti !=0), na.rm=T) | any(allab_expo != (allab_expo_quanti !=0), na.rm=T)){print("ERROR: Qualitative and quantitative AMU data are not consistent.")}
 
-rm(i, wk, weeks_col_use, weeks_col_no_use, weeks_othab_use, weeks_othab_no_use, farm_i, flockseq_i, weeks_to_keep, all_ab, viparc_data_quali, viparc_data_quanti)
+rm(i, wk, weeks_col_use, weeks_col_no_use, weeks_othab_use, weeks_othab_no_use, farm_i, flockseq_i, weeks_to_keep, all_ab, viparc_data_quali, viparc_data_quanti, id_matrix, n_samp, init_flock_size)
 
 ```
 
@@ -309,7 +309,7 @@ rm(i, wk, weeks_col_use, weeks_col_no_use, weeks_othab_use, weeks_othab_no_use, 
 
 ## Production cycles, AMU and sampling dates
 
-We plot the AMU and sampling dates for the `n_cyc` cycles. This allows to visually assess if AMU occurs shortly before sampling.
+We plot the AMU and sampling dates for the `n_cyc` cycles. We also plot an example of the growth curves available for each sample, and the area under curve.
 
 ```{r, fig.width=8, fig.height=6, fig.retina=2}
 plot(x=c(0,0.1), y=c(0,0), xlim=c(0,ncol(col_expo)+5), ylim=c(0,n_cyc+10), type="l", xlab="Weeks", ylab="", axes=F)
@@ -335,7 +335,7 @@ for (i in 1:n_cyc){
   lines(x = c(0.5, 0.5+max(which(! is.na(col_expo[i,])))), y = c(i-0.5, i-0.5), col="grey")
   lines(x = c(0.5, 0.5+max(which(! is.na(col_expo[i,])))), y = c(i+0.5, i+0.5), col="grey")
 }
-rm(i,j)
+
 legend(x=0, y=n_cyc+7, inset=0.5, legend=c("No antimicrobials used", "Antimicrobials used, including colistin", "Non-colistin antimicrobials used"), fill=c("bisque", "coral3", "deepskyblue4"), cex = 0.8, bty = "n")
 
 
@@ -350,13 +350,14 @@ print(p2, vp=viewport(width = 0.205, height = 0.275, x = 0.94, y = 0.39, just = 
 rect(xleft=23, xright=31, ybottom=10, ytop=23, lwd=2)
 lines(x=c(weeks_samp["0681",3], 23), y=c(18, 17), lwd=2)
 
+rm(i, j, p2, gcur)
 ```
 
 ## Resistance and AMU over time
 
-We plot observations (red dots) and model predictions (black line and CI) for `cyc_plot` cycles.
+We plot the observed resistance (red dots) for `cyc_plot` cycles.
 
-AMU is represented as blue bars. We can plot the qualitative use (yes/no each week), or the quantitative use (amount per kg of chicken each week).
+AMU (only colistin and all antibotics) is represented as colored bars. We can plot the qualitative use (yes/no each week), or the quantitative use (amount per kg of chicken each week).
 
 ```{r}
 cyc_plot = 1:n_cyc
@@ -423,16 +424,21 @@ p = p + geom_point(aes(y = obser), size = 3, shape = 21,  fill = "red", color = 
 p = p + facet_wrap(~ cyc)
 p
 
-rm(far, iter_list, p, pl)
+rm(far, iter_list, p, pl, ratio_mic_quanti_amu, obs_plot, cyc_plot, amu_quanti, n_weeks)
 ```
 
 ## Resistance plotted versus different AMU metrics in Shiny
 
+This function is useful to:
+
+* Show an interactive Shiny plot (`obj="plot"`)
+* The further estimation of our model (`obj="est"`), as it returns the observed resistance and AMU, depending on the value of some parameters
+
 ```{r}
 
-nwkseff=2; quantuse=T; tempo_amu="exp_decay"; thresh_res=0.5; ignore.nul=F; lag_amu_init=3; obj="plot"; expo="allab"
+# nwkseff=2; quantuse=T; tempo_amu="exp_decay"; thresh_res=0.5; ignore.nul=F; lag_amu_init=3; obj="plot"; expo="allab"
 
-aucamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore.nul=F, lag_amu_init, obj="plot", expo="allab"){
+resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore.nul=F, lag_amu_init, obj="plot", expo="allab"){
   obtab = data.frame(cycle=NA, amu_init=NA, amu_t=NA, auc=NA, age=NA, init=NA, prev=NA, end=NA)
   for(cyc_i in 1:n_cyc){
     for(time_i in 2:3){
@@ -556,7 +562,7 @@ server <- function(input, output){
     # filter the data by the input and save into new object
     # the input id must be the same as the UI object
     # plot
-    aucamu(nwkseff=input$nwkseff, lag_amu_init=input$lag_amu_init, expo=input$expo, quantuse=input$quantuse, tempo_amu=input$tempo_amu, thresh_res=input$thresh_res, ignore.nul=input$ignore.nul)
+    resamu(nwkseff=input$nwkseff, lag_amu_init=input$lag_amu_init, expo=input$expo, quantuse=input$quantuse, tempo_amu=input$tempo_amu, thresh_res=input$thresh_res, ignore.nul=input$ignore.nul)
   })
 }
 ```
@@ -565,7 +571,7 @@ To launch Shiny app:
 
 ```{r}
 # shinyApp(ui=ui, server=server)
-
+rm(ui, server)
 ```
 
 # Analysis
@@ -625,11 +631,11 @@ p
 rm(metramu, p)
 ```
 
-### Function useful for the algorithm
+### Function returning the minus loglikelihood
+
+This function enters the raw (transformed) values of the model's parameters, and returns either the minus loglikelihood (`aim="est"`), or the predicted and observed values of resistance and AMU, the minus loglikelihood and the true (not transformed) values of parameters (`aim="pred"`):
 
 ```{r}
-introd = c(rep(0, 4), 1, 0, 1, 1, 1, rep(0, 6), 1, 0, 1, rep(0, 3), 1, 0, 0, 1, rep(0, 7), 1, 0, 0, 1, 1, 1, 0, 1, rep(0, 5), 1, rep(0, 3))
-
 run2 = function(aim="est", intr=introd, distrib_res="normal", Sd=0.15, mu, lambda1, lambda2, alpha, beta, teta, delta, eta){
 
   mu = sigmoid(mu)
@@ -641,13 +647,13 @@ run2 = function(aim="est", intr=introd, distrib_res="normal", Sd=0.15, mu, lambd
   delta = round(5 * sigmoid(delta)) +1
   eta = sigmoid(eta)
 
-  obsdat = aucamu(nwkseff=beta, quantuse=F, tempo_amu="exp_decay", thresh_res=0.4, ignore.nul=F, lag_amu_init=delta, obj="est")
+  obsdat = resamu(nwkseff=beta, quantuse=F, tempo_amu="exp_decay", thresh_res=0.4, ignore.nul=F, lag_amu_init=delta, obj="est")
   obsdat = obsdat[! is.na(obsdat$auc),]
   obsdat$init[is.na(obsdat$init)] = 0
   obsdat$prev[is.na(obsdat$prev)] = 0
-  obsdat$introd = intr
+  obsdat$introduc = intr
 
-  obsdat$predmod = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta * obsdat$introd
+  obsdat$predmod = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta * obsdat$introduc
 
   if(aim == "est"){
     if(distrib_res == "normal"){
@@ -656,7 +662,7 @@ run2 = function(aim="est", intr=introd, distrib_res="normal", Sd=0.15, mu, lambd
       return(-sum(dbeta(x=obsdat$auc+0.00001, shape1=shape, shape2=shape*(1.00001-obsdat$predmod)/(obsdat$predmod+0.00001), log=T), na.rm=T))
     }
   }else if (aim == "pred"){
-    return(list(obsdat = obsdat[,c("auc", "amu_init", "amu_t", "introd", "predmod")], minll = -sum(dnorm(x=obsdat$auc, mean=obsdat$predmod, sd=Sd, log=T)), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta)))
+    return(list(obsdat = obsdat[,c("auc", "amu_init", "amu_t", "introduc", "predmod")], minll = -sum(dnorm(x=obsdat$auc, mean=obsdat$predmod, sd=Sd, log=T)), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta)))
   }
 }
 
@@ -664,11 +670,13 @@ run2 = function(aim="est", intr=introd, distrib_res="normal", Sd=0.15, mu, lambd
 
 ### Test of the estimation with simulated data
 
-### Example of Maximization step for one given set of parameters
+### Example of Maximization step for one given introduction status
 
-We use "bbmle" package for point estimates, confidence intervals and likelihood profiles:
+Here, we test the model's estimation (M-step), with one given introduction status for each observatiob. We use "bbmle" package for point estimates, and if possible for confidence intervals and likelihood profiles.
 
 ```{r}
+introd = c(rep(0, 4), 1, 0, 1, 1, 1, rep(0, 6), 1, 0, 1, rep(0, 3), 1, 0, 0, 1, rep(0, 7), 1, 0, 0, 1, 1, 1, 0, 1, rep(0, 5), 1, rep(0, 3))
+
 fit_mle2 = mle2(minuslogl = run2, method = "Nelder-Mead", control = list(maxit = 5000), start = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1))))
 
 fit_coef = coef(fit_mle2)
@@ -687,7 +695,7 @@ minll = obs_vs_pred[[2]]
 print(paste("Minus LogLikelihood:", minll))
 print("True values of parameters:")
 print(obs_vs_pred[[3]])
-p = ggplot(obs_vs_pred[[1]], aes(x = auc, y = predmod, col = obs_vs_pred[[3]]["alpha"]*amu_t + obs_vs_pred[[3]]["teta"]*amu_init, shape = as.logical(introd)))
+p = ggplot(obs_vs_pred[[1]], aes(x = auc, y = predmod, col = obs_vs_pred[[3]]["alpha"]*amu_t + obs_vs_pred[[3]]["teta"]*amu_init, shape = as.logical(introduc)))
 p = p + xlab("Obs") + ylab("Pred")
 p = p + ggtitle(paste0("Observed VS Predicted AUC (minus LogLikelihood =", round(minll, 2), ")"))
 p = p + geom_segment(aes(xend = auc, y = pmax(0, predmod - 1.96*Sd), yend = pmin(1, predmod + 1.96*Sd)), col = "grey")
@@ -698,7 +706,32 @@ p
 ```
 
 ```{r}
-rm(p, obs_vs_pred, fit_mle2, Sd, minll, introd)
+rm(p, obs_vs_pred, fit_mle2, Sd, minll, fit_coef, introd)
+```
+
+### Function repeating the fit several times
+
+This function repeats the model's fit process several times, to make sure the maximum of likelihood is not only local. It is made such that the random initialization of parameters is different from one repetition to another. Some parameters are transformed to be estimated in an interval.
+
+```{r}
+rep_est = function(nrep, minusloglrep, methodrep, controlrep, fixedvar, startvar){
+  modrep = list()
+  for(repet in 1:nrep){
+    cat("\r", paste0("Fit repetition ", repet, "/", nrep))
+    
+    valpar = list(mu=NULL, lambda1=NULL, lambda2=NULL, alpha=NULL, beta=NULL, teta=NULL, delta=NULL, eta=NULL)
+    valpar[fixedvar] = 0
+    valpar[startvar] = runif(length(startvar))
+    valpar[c("mu", "beta", "delta", "eta")] = lapply(X = valpar[c("mu", "beta", "delta", "eta")], FUN = logit)
+    
+    modrep[[repet]] = mle2(minuslogl=minusloglrep, method=methodrep, control=controlrep, fixed=valpar[fixedvar], start=valpar[startvar])
+  }
+  loglikrep = lapply(X=modrep, FUN=logLik)
+  
+  cat("\n")
+  return(modrep[[which.max(loglikrep)]])
+}
+
 ```
 
 ### Comparison of the models without introduction
@@ -706,71 +739,35 @@ rm(p, obs_vs_pred, fit_mle2, Sd, minll, introd)
 First, we fit models that do not take into account the introductions, so we do not need to implement the E-M algorithm. Because the package `bbmle` does not always find the likelihood maximum, we create a function to repeat the estimation several times, and take the maximum likelihood among these repetitions:
 
 ```{r}
-rep_est = function(nrep, minusloglrep, methodrep, controlrep, fixedrep, startrep){
-  modrep = list()
-  for(repet in 1:nrep){
-    modrep[[repet]] = mle2(minuslogl=minusloglrep, method=methodrep, control=controlrep, fixed=fixedrep, start=startrep)
-  }
-  loglikrep = lapply(X=modrep, FUN=logLik)
-  
-  return(modrep[[which.min(loglikrep)]])
-}
-
-```
-
-```{r}
 lfit = list()
 
-lfit[[1]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda1 = 0, lambda2 = 0, alpha = 0, beta = logit(0.5), teta = 0, delta = logit(0.5), eta = logit(0.5)), startrep = list(mu = logit(runif(1))))
+lfit[[1]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu"))
 
-lfit[[2]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda2 = 0, alpha = 0, beta = logit(0.5), teta = 0, delta = logit(0.5), eta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1)))
+lfit[[2]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1"))
 
-lfit[[3]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(alpha = 0, beta = logit(0.5), teta = 0, delta = logit(0.5), eta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1)))
+lfit[[3]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2"))
 
-lfit[[4]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda1 = 0, lambda2 = 0, alpha = 0, beta = logit(0.5), eta = logit(0.5)), startrep = list(mu = logit(runif(1)), teta = runif(1), delta = logit(runif(1))))
+lfit[[4]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta"), startvar = c("mu", "teta", "delta"))
 
-lfit[[5]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda2 = 0, alpha = 0, beta = logit(0.5), eta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), teta = runif(1), delta = logit(runif(1))))
+lfit[[5]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "teta",  "delta"))
 
-lfit[[6]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(alpha = 0, beta = logit(0.5), eta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), teta = runif(1), delta = logit(runif(1))))
+lfit[[6]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta"))
 
-lfit[[7]] = rep_est(nrep=10, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda1 = 0, lambda2 = 0, teta = 0, delta = logit(0.5), eta = logit(0.5)), startrep = list(mu = logit(runif(1)), alpha = runif(1), beta = logit(runif(1))))
+lfit[[7]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta"))
 
-lfit[[8]] = rep_est(nrep=10, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda2 = 0, teta = 0, delta = logit(0.5), eta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), alpha = runif(1), beta = logit(runif(1))))
+lfit[[8]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta"))
 
-lfit[[9]] = rep_est(nrep=10, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(teta = 0, delta = logit(0.5), eta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1))))
+lfit[[9]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta"))
 
-lfit[[10]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda1 = 0, lambda2 = 0, eta = logit(0.5)), startrep = list(mu = logit(runif(1)), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1))))
+lfit[[10]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2", "eta"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta"))
 
-lfit[[11]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda2 = 0, eta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1))))
+lfit[[11]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta"))
 
-lfit[[12]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(eta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1))))
-
-lfit[[13]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda1 = 0, lambda2 = 0, alpha = 0, beta = logit(0.5), teta = 0, delta = logit(0.5)), startrep = list(mu = logit(runif(1)), eta = logit(runif(1))))
-
-lfit[[14]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda2 = 0, alpha = 0, beta = logit(0.5), teta = 0, delta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), eta = logit(runif(1))))
-
-lfit[[15]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(alpha = 0, beta = logit(0.5), teta = 0, delta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), eta = logit(runif(1))))
-
-lfit[[16]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda1 = 0, lambda2 = 0, alpha = 0, beta = logit(0.5)), startrep = list(mu = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1))))
-
-lfit[[17]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda2 = 0, alpha = 0, beta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1))))
-
-lfit[[18]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(alpha = 0, beta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1))))
-
-lfit[[19]] = rep_est(nrep=10, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda1 = 0, lambda2 = 0, teta = 0, delta = logit(0.5)), startrep = list(mu = logit(runif(1)), alpha = runif(1), beta = logit(runif(1)), eta = logit(runif(1))))
-
-lfit[[20]] = rep_est(nrep=10, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda2 = 0, teta = 0, delta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), alpha = runif(1), beta = logit(runif(1)), eta = logit(runif(1))))
-
-lfit[[21]] = rep_est(nrep=10, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(teta = 0, delta = logit(0.5)), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), eta = logit(runif(1))))
-
-lfit[[22]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda1 = 0, lambda2 = 0), startrep = list(mu = logit(runif(1)), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1))))
-
-lfit[[23]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(lambda2 = 0), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1))))
-
-lfit[[24]] = rep_est(nrep=2, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedrep = list(), startrep = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1))))
+lfit[[12]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"))
 
 list_loglik = lapply(X = lfit, FUN = logLik)
 list_loglik
+
 ```
 
 
@@ -779,13 +776,14 @@ list_loglik
 Function for the E step:
 
 ```{r}
-e.step <- function(dat=dat, obs_res, params, type_mod, sigma = 0.15) {
+E_step <- function(observed, params, sigma = 0.15) {
 
-  lin_intro = run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], alpha=params[["alpha"]], teta=params[["teta"]], delta=params[["delta"]], beta=params[["beta"]], eta=params[["eta"]], lambda2=params[["lambda2"]])[["obsdat"]]$predmod
-  lin_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], alpha=params[["alpha"]], teta=params[["teta"]], delta=params[["delta"]], beta=params[["beta"]], eta=logit(0), lambda2=params[["lambda2"]])[["obsdat"]]$predmod
+  lin_intro = run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]])[["obsdat"]]$predmod
+  
+  lin_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]])[["obsdat"]]$predmod
 
-  r_intro = abs(lin_intro - obs_res) # residuals
-  r_nointro = abs(lin_nointro - obs_res)
+  r_intro = abs(lin_intro - observed) # residuals
+  r_nointro = abs(lin_nointro - observed)
 
   exp_intro = exp(- r_intro^2/sigma^2)
   exp_nointro = exp(- r_nointro^2/sigma^2)
@@ -797,126 +795,190 @@ e.step <- function(dat=dat, obs_res, params, type_mod, sigma = 0.15) {
 
   prob_intro <- exp_intro / (exp_intro + exp_nointro)
 
-  introd = rbinom(n = length(prob_intro), size = 1, prob = prob_intro)
-  introd = as.logical(introd)
+  intr_status = rbinom(n = length(prob_intro), size = 1, prob = prob_intro)
+  intr_status = as.logical(intr_status)
 
-  return(introd)
+  return(intr_status)
 }
 ```
 
 Function for the M step:
 
 ```{r}
-m.step <- function(dat=dat, introd, type_mod) {
+M_step <- function(introd, modnum) {
 
   prop_intro = sum(introd)/length(introd)
+  
+  redefine_run = function(aim="est", intr=introd, distrib_res="normal", Sd=0.15, mu, lambda1, lambda2, alpha, beta, teta, delta, eta){
 
-  run2 = function(aim="est", intr=introd, distrib_res="normal", Sd=0.15, mu, lambda1, alpha, teta, delta, beta, eta, lambda2){
-    return("RUN2 NOT DEFINED")
+  mu = sigmoid(mu)
+  lambda1 = lambda1
+  lambda2 = lambda2
+  alpha = alpha
+  beta = 10 * sigmoid(beta) +1
+  teta = teta
+  delta = round(5 * sigmoid(delta)) +1
+  eta = sigmoid(eta)
+
+  obsdat = resamu(nwkseff=beta, quantuse=F, tempo_amu="exp_decay", thresh_res=0.4, ignore.nul=F, lag_amu_init=delta, obj="est")
+  obsdat = obsdat[! is.na(obsdat$auc),]
+  obsdat$init[is.na(obsdat$init)] = 0
+  obsdat$prev[is.na(obsdat$prev)] = 0
+  obsdat$introduc = intr
+
+  obsdat$predmod = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta * obsdat$introduc
+
+  if(aim == "est"){
+    if(distrib_res == "normal"){
+      return(-sum(dnorm(x=obsdat$auc, mean=obsdat$predmod, sd=Sd, log=T), na.rm=T))
+    }else if(distrib_res == "beta"){
+      return(-sum(dbeta(x=obsdat$auc+0.00001, shape1=shape, shape2=shape*(1.00001-obsdat$predmod)/(obsdat$predmod+0.00001), log=T), na.rm=T))
+    }
+  }else if (aim == "pred"){
+    return(list(obsdat = obsdat[,c("auc", "amu_init", "amu_t", "introduc", "predmod")], minll = -sum(dnorm(x=obsdat$auc, mean=obsdat$predmod, sd=Sd, log=T)), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta)))
   }
+}
   
-  fit_mle2 = list()
-  true_coef = list()
-  llmod = c()
-  
-  for(rep in 1:3){
-    print(paste0("M-step repeat ", rep))
-    
-    fit_mle2[[rep]] = mle2(minuslogl = run2, method = "Nelder-Mead", control = list(maxit = 5000), start = list(mu = logit(runif(1)), lambda1 = runif(1), alpha = runif(1), teta = log(runif(1)), delta = logit(runif(1)), beta = logit(runif(1)), eta = logit(runif(1)), lambda2 = runif(1)))
-    
-    ob_pred = run2(aim="pred", mu=coef(fit_mle2[[rep]])[1], lambda1=coef(fit_mle2[[rep]])[2], alpha=coef(fit_mle2[[rep]])[3], teta=coef(fit_mle2[[rep]])[4], delta=coef(fit_mle2[[rep]])[5], beta=coef(fit_mle2[[rep]])[6], eta=coef(fit_mle2[[rep]])[7], lambda2=coef(fit_mle2[[rep]])[8])
-    
-    true_coef[[rep]] = ob_pred[[3]]
-    llmod[rep] = ob_pred[[2]]
+  #####
+  if(modnum == 13){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"), startvar = c("mu", "eta"))
+  }else if(modnum == 14){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta"), startvar = c("mu",  "lambda1", "eta"))
+  }else if(modnum == 15){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta"), startvar = c("mu",  "lambda1",  "lambda2", "eta"))
+  }else if(modnum == 16){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "alpha",  "beta"), startvar = c("mu",  "teta",  "delta", "eta"))
+  }else if(modnum == 17){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta"), startvar = c("mu",  "lambda1",  "teta",  "delta", "eta"))
+  }else if(modnum == 18){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta", "eta"))
+  }else if(modnum == 19){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta"), startvar = c("mu",  "alpha",  "beta", "eta"))
+  }else if(modnum == 20){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta"), startvar = c("mu",  "lambda1",  "alpha",  "beta", "eta"))
+  }else if(modnum == 21){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta", "eta"))
+  }else if(modnum == 22){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta", "eta"))
+  }else if(modnum == 23){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta", "eta"))
+  }else if(modnum == 24){
+    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c(), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta"))
   }
+  #####
   
-  fit_mle2 = fit_mle2[[which.min(llmod)]]
-  true_coef = true_coef[[which.min(llmod)]]
-  llmod = llmod[which.min(llmod)]
-
-  modstep = fit_mle2
-  est_param = c(coef(fit_mle2), p_intro = prop_intro)
-
-  return(list(est_param, llmod, modstep, true_coef))
+  raw_coef = coef(modstep)
+  ob_pred = redefine_run(aim="pred", mu=raw_coef["mu"], lambda1=raw_coef["lambda1"], lambda2=raw_coef["lambda2"], alpha=raw_coef["alpha"], beta=raw_coef["beta"], teta=raw_coef["teta"], delta=raw_coef["delta"], eta=raw_coef["eta"])
+  
+  raw_coef = c(raw_coef, p_intro = prop_intro)
+  llmod = ob_pred[[2]]
+  true_coef = ob_pred[[3]]
+  
+  return(list(raw_coef, llmod, modstep, true_coef))
 }
 ```
 
 Function to launch the whole algorithm:
 
 ```{r}
-em.2lines <- function(dat=0, tol=1, max.step=1e3, type_mod, init_params) {
-  step = 0
-  loglik = 10^6
+EM_algo <- function(modnum, numb_rep_algo=1, tol=1, max.step=100) {
 
-  params = init_params
+  repetalgo = list()
+  repetalgo_minloglik = c()
   
-  obs_res = aucamu(obj="est")$auc
-  obs_res = obs_res[! is.na(obs_res)]
+  for(algorep_ite in 1:numb_rep_algo){
+    print(paste0("##### Model ", modnum, " (repetition ", algorep_ite, "/", numb_rep_algo, " of the algorithm) #####")); cat("\n")
+    
+    step = 0
+    minloglik = 10^6
+    
+    raw_params = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1)), p_intro = runif(1))
+    
+    obs_res = resamu(obj="est", nwkseff=1, thresh_res=0.5, lag_amu_init=1)$auc
+    obs_res = obs_res[! is.na(obs_res)]
 
-  repeat {
-    print(paste0("Step: ", step))
-    introd = e.step(dat, obs_res=obs_res, params, type_mod=type_mod)
-    fit_mod = m.step(dat, introd, type_mod=type_mod)
-    params = fit_mod[[1]]
-    old.loglik = loglik
-    loglik = fit_mod[[2]]
-    print(paste0("MinusLL: ", loglik))
-    modstep = fit_mod[[3]]
-    param_true_format = fit_mod[[4]]
-
-    if (abs(loglik - old.loglik) < tol){
-      counting_for_convergence = counting_for_convergence +1
-    }else{
-      counting_for_convergence = 0
+    counting_for_convergence = 0
+    while((counting_for_convergence <3) & (step <= max.step+1)){
+      step = step +1
+      if(step == max.step+1){
+        print(paste0("Convergence of the likelihood was not reached after ", max.step, " steps."))
+        break
+      }
+      
+      print(paste0("Step: ", step))
+      introductions = E_step(observed=obs_res, params=raw_params)
+      output_mstep = M_step(introd=introductions, modnum)
+      raw_params = output_mstep[[1]]
+      old.minloglik = minloglik
+      minloglik = output_mstep[[2]]
+      print(paste0("Minus Log Likelihood: ", minloglik))
+      modstep = output_mstep[[3]]
+      param_true_format = output_mstep[[4]]
+  
+      if (abs(minloglik - old.minloglik) < tol){
+        counting_for_convergence = counting_for_convergence +1
+      }else{
+        counting_for_convergence = 0
+      }
     }
-
-    if((counting_for_convergence == 3) | (loglik < -100)){break}
-
-    step = step +1
-    if (step > max.step){
-      break
-    }
+    print(paste0("Final step: ", step)); cat("\n")
+    
+    repetalgo[[algorep_ite]] = list(modstep, raw_params, introductions, minloglik, param_true_format)
+    repetalgo_minloglik[algorep_ite] = minloglik
   }
-  print(paste0("Final step: ", step))
-
-return(list(modstep, params, introd, loglik, param_true_format))
+  
+return(repetalgo[[which.min(repetalgo_minloglik)]])
 }
 ```
 
 We launch the algorithm:
 
 ```{r}
-# rand = round(100*runif(n=1))
-# set.seed(rand)
-# results = em.2lines(type_mod = "linear2", init_params = list(mu = logit(runif(1)), lambda1 = runif(1), alpha = runif(1), teta = log(runif(1)), delta = logit(runif(1)), beta = logit(runif(1)), eta = logit(runif(1)), lambda2 = runif(1), p_intro = runif(1)))
-# summary(results[[1]])
-# results[[5]]
-# print(paste0("Probability of introduction: ", results[[2]][["p_intro"]]))
-# print(paste0("Loglikelihood:", results[[4]]))
+randseed = round(100*runif(n=1))
+set.seed(randseed)
+results = EM_algo(modnum=13, numb_rep_algo=2)
+summary(results[[1]])
+results[[5]]
+print(paste0("Probability of introduction: ", results[[2]][["p_intro"]]))
+print(paste0("Minus loglikelihood:", results[[4]]))
 
 ```
 
 We plot the results:
 
 ```{r}
-# Sd=0.15
-# 
-# obs_vs_pred = run2(aim="pred", intr=results[[3]], mu=coef(results[[1]])[1], lambda1=coef(results[[1]])[2], alpha=coef(results[[1]])[3], teta=coef(results[[1]])[4], delta=coef(results[[1]])[5], beta=coef(results[[1]])[6], eta=coef(results[[1]])[7], lambda2=coef(results[[1]])[8])
-# 
-# minll = obs_vs_pred[[2]]
-# print(paste("Minus LogLikelihood:", minll))
-# print("True values of parameters:")
-# print(obs_vs_pred[[3]])
-# p = ggplot(obs_vs_pred[[1]], aes(x = auc, y = predmod, col = amu, shape = as.logical(introd)))
-# p = p + xlab("Obs") + ylab("Pred")
-# p = p + ggtitle(paste0("Observed VS Predicted AUC (minus LogLikelihood =", round(minll, 2), ")"))
-# p = p + geom_segment(aes(xend = auc, y = pmax(0, predmod - 1.96*Sd), yend = pmin(1, predmod + 1.96*Sd)), col = "grey")
-# p = p + geom_abline(intercept = 0, slope = 1, linetype = "dashed")
-# p = p + geom_point(size=2) + labs(shape = "Introduction")
-# p
-# 
-# ggplot(obs_vs_pred[[1]], aes(x=amu, y=auc, col=as.logical(introd))) + geom_point() + xlab("Metric for AMU") + ylab("Measure of resistance (area under curve)") + labs(col = "Introduction")
 
+Sd=0.15
+
+fit_coef = coef(results[[1]])
+obs_vs_pred = run2(aim="pred", intr=results[[3]], mu=fit_coef["mu"], lambda1=fit_coef["lambda1"], lambda2=fit_coef["lambda2"], alpha=fit_coef["alpha"], beta=fit_coef["beta"], teta=fit_coef["teta"], delta=fit_coef["delta"], eta=fit_coef["eta"])
+
+minll = obs_vs_pred[[2]]
+print(paste("Minus LogLikelihood:", minll))
+print("True values of parameters:")
+print(obs_vs_pred[[3]])
+p = ggplot(obs_vs_pred[[1]], aes(x = auc, y = predmod, shape = as.logical(introduc), col = obs_vs_pred[[3]]["alpha"]*amu_t + obs_vs_pred[[3]]["teta"]*amu_init))
+p = p + xlab("Obs") + ylab("Pred")
+p = p + ggtitle(paste0("Observed VS Predicted AUC (minus LogLikelihood =", round(minll, 2), ")"))
+p = p + geom_segment(aes(xend = auc, y = pmax(0, predmod - 1.96*Sd), yend = pmin(1, predmod + 1.96*Sd)), col = "grey")
+p = p + geom_abline(intercept = 0, slope = 1, linetype = "dashed")
+p = p + geom_point(size=2) + labs(shape = "Introduction")
+p
+
+# ggplot(obs_vs_pred[[1]], aes(x=amu, y=auc, col=as.logical(introduc))) + geom_point() + xlab("Metric for AMU") + ylab("Measure of resistance (area under curve)") + labs(col = "Introduction")
+
+```
+
+### Comparison of the models:
+
+```{r}
+bbmle::anova(lfit[[13]], lfit[[19]]) # Best among 1 to 12: model 7 (and 8 but more parameters)
+
+for(m in c(13:15, 19:21)){
+  print(m)
+  print(logLik(lfit[[m]]))
+  # print(AIC(lfit[[m]]))
+}
 ```
 
 ### Comparison of the contributions of "amu", "init" and "introd" variables to the output
