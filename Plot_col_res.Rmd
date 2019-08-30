@@ -6,6 +6,7 @@ output:
   html_document:
     theme: cerulean
     toc: yes
+    toc_float: true
   pdf_document:
     toc: yes
 <!-- bibliography: references.bib -->
@@ -76,6 +77,8 @@ library(readxl)
 library(pracma)
 library(agrmt)
 library(shiny)
+library(parallel)
+library(plotly)
 
 ```
 
@@ -106,87 +109,6 @@ gcur = as.data.frame(read_excel(path="C:/Users/Jonathan/Desktop/Programmes/colis
 id_matrix = mic_data[,c("ID", "FarmID", "Flockseq")]
 ```
 
-## Resistance data: determine which Optical Density dataset to use
-
-First, we use `gcur`. Let us plot the growth curves for each concentration. We remove concentrations 3 and 6, as too few OD were measured for these concentrations.
-
-```{r, cache=T}
-gcur = melt(gcur, id.vars = c("SampleID", "Conc.", "FlockID", "SamplPoint", "Repeat"), variable.name = "Time")
-gcur$Time = as.numeric(gcur$Time)
-
-# Unique ID for each observed curve:
-gcur$obsID = paste0(gcur$SampleID, gcur$Repeat)
-
-# Remove concentrations 3 and 6:
-gcur = gcur[which(!gcur$Conc. %in% c(3, 6)),]
-
-p = ggplot(data = gcur, aes(x=Time, group=obsID))
-p = p + ggtitle("Optical Density in all samples for each concentration")
-p = p + xlab("Time (hours)") + ylab("OD (optical density)")
-p = p + geom_line(aes(y=value), col="grey")
-p = p + facet_wrap(~Conc.)
-p
-
-rm(p)
-```
-
-Our objective is to use a concentration that offers a distribution of areas under curve (AUC) as spread out as possible. We see that, in concentrations 0 and 0.5, no curve is totally flat, i.e. all samples show some growth. On the contrary, in concentrations 8, 12 and 16, most of the samples show no growth. Therefore, we need to choose between concentrations 1, 2 and 4, that all present a spread range of curves (and thus AUC).
-
-For these concentrations (1, 2 and 4), we compute the area under curve (AUC), for each sample, between t=15 hours and t=50 hours. This corresponds to the moment curves start to grow.
-
-To measure how much the distributions of AUC are spread out for each concentration, we use the ["van der Eijk's A" statistic](https://en.wikipedia.org/wiki/Multimodal_distribution#van_der_Eijk's_A).  It ranges between -1 (perfect bimodality of the distribution) to +1 (perfect unimodality). A value of 0 corresponds to a uniform distribution. We select the concentration for which this statistic is closest to 0, because we aim to have both a spread distribution, and intermediary values of AUC (between high AUC - resistant samples - and low AUC - not resistant samples). We use package `agrmt`.
-
-```{r, cache=T}
-VdE_A_score = function(conc, t_start, t_end){
-  
-  all_auc = c()
-  for(ts in unique(gcur$obsID)){
-    if(length(seq(t_start,t_end)) == length(gcur$value[which((gcur$Time %in% seq(t_start,t_end)) & (gcur$Conc. == conc) & (gcur$obsID == ts))])){
-      all_auc = c(all_auc, trapz(x = seq(t_start,t_end), y = gcur$value[which((gcur$Time %in% seq(t_start,t_end)) & (gcur$Conc. == conc) & (gcur$obsID == ts))]))
-    }else{
-      print(paste0("Problematic number of repetitions for obsID=", ts, " (concentration ", conc, ")."))
-    }
-  }
-  return(VdE_A = agreement(table(factor(round(all_auc)))))
-}
-
-for(c in c(1, 2, 4)){
-  print(paste("van der Eijk's A for concentration", c, ":"))
-  print(VdE_A_score(conc=c, t_start=15, t_end=50))
-}
-
-rm(c, VdE_A_score)
-```
-
-We therefore select concentration 1. We average the 2 repetitions of a same sample, and reshape the data to obtain `auc_ob`. We standardize the AUC values to range between 0 (lowest value) and 1 (highest value).
-
-```{r}
-gcur = gcur[which(gcur$Conc. == 1),]
-
-gcur = dcast(gcur, SampleID + Conc. + FlockID + SamplPoint + Time ~ Repeat, value.var="value")
-gcur$od = (gcur$`1` + gcur$`2`)/2
-gcur = gcur[,c("SampleID", "Conc.", "FlockID", "SamplPoint", "Time", "od")]
-
-auc_ob = as.data.frame(matrix(NA, nrow = length(unique(gcur$FlockID)), ncol = length(unique(gcur$SamplPoint))))
-dimnames(auc_ob) = list(unique(gcur$FlockID), c("S", "M", "E"))
-for(flo in unique(gcur$FlockID)){
-  for(sp in unique(gcur$SamplPoint)){
-    if(length(15:50) == length(gcur$od[which((gcur$Time %in% (15:50)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])){
-      auc_ob[flo, sp] = trapz(x = 15:50, y = gcur$od[which((gcur$Time %in% (15:50)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])
-    }else{
-      print(paste0("Impossible to compute area under curve for flock ", flo, ", sampling point ", sp))
-    }
-  }
-}
-
-auc_ob = (auc_ob - min(auc_ob, na.rm=T))/(max(auc_ob, na.rm=T) - min(auc_ob, na.rm=T))
-
-# auc_ob = auc_ob[which(! rownames(auc_ob) %in% c("0351", "0381", "0391", "0765")),]
-# mic_data = mic_data[which(! mic_data$ID %in% c("0351", "0381", "0391", "0765")),]
-
-rm(flo, sp)
-```
-
 ## Choose type of resistance data: growth curves or MIC
 
 Here, we decide which resistance data we analyze: "growth_curves" or "mic":
@@ -196,17 +118,115 @@ type_res_data = "growth_curves"
 ```
 
 ```{r}
-if(type_res_data == "growth_curves"){
-  res_data = auc_ob
-}else if(type_res_data == "mic"){
+if(type_res_data == "mic"){
   res_data = mic_data[,c("Start", "Mid", "End")]
   rownames(res_data) = mic_data$ID
   colnames(res_data) = c("S", "M", "E")
   res_data = (res_data - min(res_data, na.rm=T))/(max(res_data, na.rm=T) - min(res_data, na.rm=T))
+  
+  rm(gcur)
 }
 
+```
+
+## Resistance data: determine which Optical Density dataset to use
+
+This is the case we chose growth curves as a measure of resistance in samples. We use `gcur`. Let us plot the growth curves for each concentration. We remove concentrations 3 and 6, as too few OD were measured for these concentrations.
+
+```{r, cache=T}
+if(type_res_data == "growth_curves"){
+  
+  gcur = melt(gcur, id.vars = c("SampleID", "Conc.", "FlockID", "SamplPoint", "Repeat"), variable.name = "Time")
+  gcur$Time = as.numeric(gcur$Time)
+  
+  # Unique ID for each observed curve:
+  gcur$obsID = paste0(gcur$SampleID, gcur$Repeat)
+  
+  # Remove concentrations 3 and 6:
+  gcur = gcur[which(!gcur$Conc. %in% c(3, 6)),]
+  
+  p = ggplot(data = gcur, aes(x=Time, group=obsID))
+  p = p + ggtitle("Optical Density in all samples for each concentration")
+  p = p + xlab("Time (hours)") + ylab("OD (optical density)")
+  p = p + geom_line(aes(y=value), col="grey")
+  p = p + facet_wrap(~Conc.)
+  p
+  
+  rm(p)
+}
+```
+
+Our objective is to use a concentration that offers a distribution of areas under curve (AUC) as spread out as possible. We see that, in concentrations 0 and 0.5, no curve is totally flat, i.e. all samples show some growth. On the contrary, in concentrations 8, 12 and 16, most of the samples show no growth. Therefore, we need to choose between concentrations 1, 2 and 4, that all present a spread range of curves (and thus AUC).
+
+For these concentrations (1, 2 and 4), we compute the area under curve (AUC), for each sample, between t=15 hours and t=50 hours. This corresponds to the moment curves start to grow.
+
+To measure how much the distributions of AUC are spread out for each concentration, we use the ["van der Eijk's A" statistic](https://en.wikipedia.org/wiki/Multimodal_distribution#van_der_Eijk's_A).  It ranges between -1 (perfect bimodality of the distribution) to +1 (perfect unimodality). A value of 0 corresponds to a uniform distribution. We select the concentration for which this statistic is closest to 0, because we aim to have both a spread distribution, and intermediary values of AUC (between high AUC - resistant samples - and low AUC - not resistant samples). We use package `agrmt`.
+
+```{r, cache=T}
+if(type_res_data == "growth_curves"){
+  
+  VdE_A_score = function(conc, t_start, t_end){
+    
+    all_auc = c()
+    for(ts in unique(gcur$obsID)){
+      if(length(seq(t_start,t_end)) == length(gcur$value[which((gcur$Time %in% seq(t_start,t_end)) & (gcur$Conc. == conc) & (gcur$obsID == ts))])){
+        all_auc = c(all_auc, trapz(x = seq(t_start,t_end), y = gcur$value[which((gcur$Time %in% seq(t_start,t_end)) & (gcur$Conc. == conc) & (gcur$obsID == ts))]))
+      }else{
+        print(paste0("Problematic number of repetitions for obsID=", ts, " (concentration ", conc, ")."))
+      }
+    }
+    
+    VdE_A = agreement(table(factor(round(all_auc))))
+  }
+  
+  for(c in c(1, 2, 4)){
+    print(paste("van der Eijk's A for concentration", c, ":"))
+    print(VdE_A_score(conc=c, t_start=15, t_end=50))
+  }
+  
+  rm(c, VdE_A_score)
+}
+```
+
+We therefore select concentration 1. We average the 2 repetitions of a same sample, and reshape the data to obtain `auc_ob`. We standardize the AUC values to range between 0 (lowest value) and 1 (highest value).
+
+```{r}
+if(type_res_data == "growth_curves"){
+  
+  gcur = gcur[which(gcur$Conc. == 1),]
+  
+  gcur = dcast(gcur, SampleID + Conc. + FlockID + SamplPoint + Time ~ Repeat, value.var="value")
+  gcur$od = (gcur$`1` + gcur$`2`)/2
+  gcur = gcur[,c("SampleID", "Conc.", "FlockID", "SamplPoint", "Time", "od")]
+  
+  auc_ob = as.data.frame(matrix(NA, nrow = length(unique(gcur$FlockID)), ncol = length(unique(gcur$SamplPoint))))
+  dimnames(auc_ob) = list(unique(gcur$FlockID), c("S", "M", "E"))
+  for(flo in unique(gcur$FlockID)){
+    for(sp in unique(gcur$SamplPoint)){
+      if(length(15:50) == length(gcur$od[which((gcur$Time %in% (15:50)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])){
+        auc_ob[flo, sp] = trapz(x = 15:50, y = gcur$od[which((gcur$Time %in% (15:50)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])
+      }else{
+        print(paste0("Impossible to compute area under curve for flock ", flo, ", sampling point ", sp))
+      }
+    }
+  }
+  
+  auc_ob = (auc_ob - min(auc_ob, na.rm=T))/(max(auc_ob, na.rm=T) - min(auc_ob, na.rm=T))
+  
+  # auc_ob = auc_ob[which(! rownames(auc_ob) %in% c("0351", "0381", "0391", "0765")),]
+  # mic_data = mic_data[which(! mic_data$ID %in% c("0351", "0381", "0391", "0765")),]
+  
+  res_data = auc_ob
+
+  rm(flo, sp, auc_ob)
+}
+```
+
+No matters if the resistance metric we chose is "growth_curves" or "mic", the measure is between 0 (lowest resistance) and 1 (highest resistance). We print the first rows of the resistance dataset:
+
+```{r}
 print(head(res_data))
-rm(type_res_data, auc_ob, mic_data)
+rm(type_res_data, mic_data)
 ```
 
 ## Antimicrobial use and sampling times
@@ -221,7 +241,7 @@ AMU is observed on a weekly basis. The molecules used are recorded either in a q
 We specify that we include all antibiotics in the `all_ab` category:
 
 ```{r}
-all_ab = colnames(viparc_data_quali)[10:54] #[! colnames(viparc_data_quali)[10:54] %in% c("colistin_use", "unknown_use")]
+all_ab = colnames(viparc_data_quali)[10:54]
 ```
 
 We define `n_cyc`, number of cycles included in the analysis, and n_samp, number of sampling times (3 in the study):
@@ -251,39 +271,34 @@ for(i in 1:n_cyc){
   # Colistin use (qualitative and quantitative):
   
   weeks_col_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali[,"colistin_use"] == T))]
+  
   weeks_col_no_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali[,"colistin_use"] == F))]
   
   col_expo[i, weeks_col_use] = 1
   col_expo[i, weeks_col_no_use] = col_expo_quanti[i, weeks_col_no_use] = 0
   
+  # Quantitative colistin use
   for(wk in weeks_col_use){
     col_expo_quanti[i, wk] = 1000 * viparc_data_quanti[which((viparc_data_quanti$farm == farm_i)&(viparc_data_quanti$flock == flockseq_i)&(viparc_data_quanti$week == wk)), which(colnames(viparc_data_quali) == "colistin_use")]
   }
   
-  # Other AB use (qualitative and quantitative):
+  # All antibiotics use (qualitative and quantitative):
   
-  if(length(all_ab) > 1){
-    
-    weeks_othab_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(rowSums(viparc_data_quali[,all_ab], na.rm=T) != 0))]
-    weeks_othab_no_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(rowSums(viparc_data_quali[,all_ab], na.rm=T) == 0))]
-    
-  }else if(length(all_ab) == 1){
-    
-    weeks_othab_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali[,all_ab] == T))]
-    weeks_othab_no_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali[,all_ab] == F))]
-
-  }
+  weeks_allab_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(rowSums(viparc_data_quali[,all_ab], na.rm=T) != 0))]
   
-  allab_expo[i, weeks_othab_use] = 1
-  allab_expo[i, weeks_othab_no_use] = allab_expo_quanti[i, weeks_othab_no_use] = 0
+  weeks_allab_no_use = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(rowSums(viparc_data_quali[,all_ab], na.rm=T) == 0))]
+    
+  allab_expo[i, weeks_allab_use] = 1
+  allab_expo[i, weeks_allab_no_use] = allab_expo_quanti[i, weeks_allab_no_use] = 0
   
-  for(wk in weeks_othab_use){
+  # Quantitative [all antibiotics] use
+  for(wk in weeks_allab_use){
     allab_expo_quanti[i, wk] = 1000 * sum(viparc_data_quanti[which((viparc_data_quanti$farm == farm_i)&(viparc_data_quanti$flock == flockseq_i)&(viparc_data_quanti$week == wk)), which(colnames(viparc_data_quali) %in% all_ab)])
   }
   
   # Weeks of sampling:
   
-  weeks_samp[i,] = c(viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali$sampling == T))], rep(NA, n_samp))[1:n_samp]
+  weeks_samp[i,] = viparc_data_quali$week[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i)&(viparc_data_quali$sampling == T))]
   
   # Initial flock size:
   
@@ -301,7 +316,7 @@ n_weeks = max(weeks_to_keep)
 
 if(any(col_expo != (col_expo_quanti !=0), na.rm=T) | any(allab_expo != (allab_expo_quanti !=0), na.rm=T)){print("ERROR: Qualitative and quantitative AMU data are not consistent.")}
 
-rm(i, wk, weeks_col_use, weeks_col_no_use, weeks_othab_use, weeks_othab_no_use, farm_i, flockseq_i, weeks_to_keep, all_ab, viparc_data_quali, viparc_data_quanti, id_matrix, n_samp, init_flock_size)
+rm(i, wk, weeks_col_use, weeks_col_no_use, weeks_allab_use, weeks_allab_no_use, farm_i, flockseq_i, weeks_to_keep, all_ab, viparc_data_quali, viparc_data_quanti, id_matrix, n_samp, init_flock_size)
 
 ```
 
@@ -355,17 +370,17 @@ rm(i, j, p2, gcur)
 
 ## Resistance and AMU over time
 
-We plot the observed resistance (red dots) for `cyc_plot` cycles.
+We plot the observed resistance (red dots) for each cycle.
 
-AMU (only colistin and all antibotics) is represented as colored bars. We can plot the qualitative use (yes/no each week), or the quantitative use (amount per kg of chicken each week).
+AMU (only colistin and all antibotics) is represented as colored bars. We can plot the qualitative use (yes/no each week) (`amu_quanti=F`), or the quantitative use (amount per kg of chicken each week) (`amu_quanti=T`). In the latter case, we fix a ceiling, i.e. a maximum of the quantity plotted: this is to avoid one large AMU measure preventing to observe lower quantities on the graph. This ceiling is determined by `ratio_resmet_quanti_amu` which is the ratio between the maximum value of the resistance metric, and the maximum value of the AMU **on the plot** (no consequence on the values in the analysis).
 
 ```{r}
-cyc_plot = 1:n_cyc
 amu_quanti = F
+ratio_resmet_quanti_amu = 50
 
 ```
 
-```{r warning=F, fig.width=8, fig.height=6}
+```{r, warning=F, fig.width=8, fig.height=6}
 obs_plot = rbind(data.frame(cyc=rep(NA, n_cyc*n_weeks), week=rep(NA, n_cyc*n_weeks), obser=rep(NA, n_cyc*n_weeks), exp_ab=rep(NA, n_cyc*n_weeks), type_ab=rep("Colistin", n_cyc*n_weeks)),
                  data.frame(cyc=rep(NA, n_cyc*n_weeks), week=rep(NA, n_cyc*n_weeks), obser=rep(NA, n_cyc*n_weeks), exp_ab=rep(NA, n_cyc*n_weeks), type_ab=rep("All antibiotics", n_cyc*n_weeks)))
 
@@ -375,6 +390,7 @@ obs_plot$week = rep(seq(1,n_weeks),n_cyc)
 for (f in rownames(res_data)){
   n_weeks_cyc = sum(!(is.na(col_expo[f,])))
   samp_cyc = which(!(is.na(res_data[f,])))
+  
   if(length(samp_cyc) < 2){print(paste0("CAUTION: For cycle ", f,", the number of samples collected is strictly less than 2"))}
 
   obs_plot$obser[which((obs_plot$cyc==f) & (obs_plot$week %in% weeks_samp[f,samp_cyc]))] = as.numeric(res_data[f,samp_cyc])
@@ -389,54 +405,48 @@ for (f in rownames(res_data)){
   }
 }
 
-# obs_plot$exp_ab[obs_plot$exp_ab == 0] = NA
-
-ratio_mic_quanti_amu = 50
-
 if(amu_quanti){
-  obs_plot$exp_ab[which(obs_plot$exp_ab > (max(res_data, na.rm=T) * ratio_mic_quanti_amu/2))] = max(res_data, na.rm=T) * ratio_mic_quanti_amu/2
+  obs_plot$exp_ab[which(obs_plot$exp_ab > (max(res_data, na.rm=T) * ratio_resmet_quanti_amu))] = max(res_data, na.rm=T) * ratio_resmet_quanti_amu
 }
 
 obs_plot$cyc = factor(obs_plot$cyc, levels=rownames(res_data))
 
-rm(f, n_weeks_cyc, samp_cyc)
-
 # Plot:
 
-p = ggplot(data=obs_plot[which(obs_plot$cyc %in% rownames(res_data)[cyc_plot]),], aes(x=week))
+p = ggplot(data=obs_plot[which(obs_plot$cyc %in% rownames(res_data)),], aes(x=week))
 p = p + xlab("Time (weeks)")
 p = p + ylab("Resistance metric")
-p = p + ggtitle("AMU and colistin resistance")
 
 if(amu_quanti){
-  p = p + geom_bar(aes(y=exp_ab/ratio_mic_quanti_amu, fill=type_ab), stat="identity", position="dodge2", col=NA)
   
-  p = p + scale_y_continuous(sec.axis = sec_axis(~.*ratio_mic_quanti_amu, name = paste0("AMU (mg/kg) (ceiling ", round(max(res_data, na.rm=T) * ratio_mic_quanti_amu/2), " mg/kg for each type)")))#, limits=c(0, 0.1+max(res_data, na.rm=T)))
+  p = p + ggtitle("Quantitative AMU and colistin resistance in each cycle")
+  p = p + geom_bar(aes(y=exp_ab/ratio_resmet_quanti_amu, fill=type_ab), stat="identity", position="dodge2", col=NA)
+  
+  p = p + scale_y_continuous(sec.axis = sec_axis(~.*ratio_resmet_quanti_amu, name = paste0("AMU (mg/kg) (ceiling ", round(max(res_data, na.rm=T) * ratio_resmet_quanti_amu), " mg/kg for each type)")))
   p = p + theme(axis.text.y.right = element_text(color="blue"), axis.title.y.right = element_text(color="blue"))
 
 }else{
+  
+  p = p + ggtitle("Qualitative AMU and colistin resistance in each cycle")
   p = p + geom_bar(aes(y=exp_ab/2, fill=type_ab), stat="identity", position="stack", col=NA)
 }
+
 p = p +  scale_fill_discrete(name = "Antibiotics used:")
-
 p = p + geom_point(aes(y = obser), size = 3, shape = 21,  fill = "red", color = "black")
-
 p = p + facet_wrap(~ cyc)
 p
 
-rm(far, iter_list, p, pl, ratio_mic_quanti_amu, obs_plot, cyc_plot, amu_quanti, n_weeks)
+rm(f, n_weeks_cyc, samp_cyc, far, iter_list, p, pl, ratio_resmet_quanti_amu, obs_plot, amu_quanti, n_weeks)
 ```
 
 ## Resistance plotted versus different AMU metrics in Shiny
 
 This function is useful to:
 
-* Show an interactive Shiny plot (`obj="plot"`)
+* Show an interactive Shiny plot (`obj="plot"`) (not shown in the regular html)
 * The further estimation of our model (`obj="est"`), as it returns the observed resistance and AMU, depending on the value of some parameters
 
 ```{r}
-
-# nwkseff=2; quantuse=T; tempo_amu="exp_decay"; thresh_res=0.5; ignore.nul=F; lag_amu_init=3; obj="plot"; expo="allab"
 
 resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore.nul=F, lag_amu_init, obj="plot", expo="allab"){
   obtab = data.frame(cycle=NA, amu_init=NA, amu_t=NA, auc=NA, age=NA, init=NA, prev=NA, end=NA)
@@ -480,7 +490,7 @@ resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore
       if(lag_amu_init > last_amu_week_consid){
         lag_amu_init = last_amu_week_consid
       }
-      amu_init = use_quanti[cyc_i, (1:lag_amu_init)]
+      amu_init = c(use_quanti[cyc_i, (1:floor(lag_amu_init))], (lag_amu_init - floor(lag_amu_init)) * use_quanti[cyc_i, ceiling(lag_amu_init)])
       
       amu_init = sum(amu_init)
       
@@ -502,7 +512,7 @@ resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore
     p = p + ggtitle(paste0("Pearson correlation: ", round(cor(obtab$amu_init + obtab$amu_t, obtab$auc, use="complete.obs"), 3), " (", nrow(na.omit(obtab)), " complete observations, including ", round(sum(obtab$auc >= thresh_res, na.rm=T)*100/nrow(na.omit(obtab))), "% above threshold)"))
     p = p + geom_point()
     p = p + geom_hline(yintercept = thresh_res, linetype="dashed", col="grey")
-    # p = p + scale_color_gradient(low = "red", high = "blue")
+    p = p + scale_color_gradient(low = "red", high = "blue")
     # p = ggplotly(p)
     return(p)
   }else if(obj == "est"){
@@ -567,7 +577,7 @@ server <- function(input, output){
 }
 ```
 
-To launch Shiny app:
+To launch Shiny app (not active on the simple html knit of the Rmd file):
 
 ```{r}
 # shinyApp(ui=ui, server=server)
@@ -576,7 +586,7 @@ rm(ui, server)
 
 # Analysis
 
-## Expectation-Maximization algorithm
+## Model and Expectation-Maximization algorithm
 
 The introduction of colistin resistant bacteria from outside the flock is not measured but can potentially play an important role in the resistance of the sample. We consider a latent (unobserved) binary variable to describe if an introduction happened in the farm (yes/no).
 
@@ -587,35 +597,36 @@ We use an Expectation-Maximization (E-M) algorithm with 2 steps:
 
 The algorithm is initiated with a random set of parameters, and is terminated when a convergence of likelihood is reached.
 
-For all observations in the 2nd or 3rd round of samplings, we define the model used in the Maximization step as:
+For all observations in the 2nd or 3rd round of samplings, we define a model used in the Maximization step. Several models are tested, all being simplified versions of this full model:
 
 $$AUC_t = \sum_{k \in \{ t_1 ; t_2 \} }(\lambda_k.AUC_k) + \eta.f(t) + \alpha.AMU_t + \theta.AMU_{init} + \mu$$
 where:
 
 * $AUC$ is the measure of sample's resistance
 * $t$ is the week the sample was collected
-* $AUC_{init}$ is the measure of resistance in the initial sample of the same flock
+* $AUC_{t_1}$ is the measure of resistance in the initial sample of the same flock
 * $f(t)=1$ if an introduction occurred before the sampling (between $t-\xi$ and $t-1$), and $f(t)=0$ otherwise
-* $AMU_t$ is the AMU metric (see below)
-* $AUC_{prev}$ is the measure of resistance in the previous sample if the observation belongs to the 3rd round of sampling (autocorrelation)
+* $AUC_{t_2}$ is the measure of resistance in the previous sample if the observation belongs to the 3rd round of sampling (autocorrelation)
 * $\mu$ is the average resistance when all other variables are null.
 
-The AMU metric $AMU_t$ is defined as:
+The AMU metric $AMU_t$ is the use that just precedes the sampling date, and is defined as:
 
 $$AMU_t=\sum_{i=1}^{t-1}(U(i).exp[-\frac{ln(1/\epsilon)}{\beta}.(t-i-1)])$$
 
-where $U(i)$ is the (quantitative or qualitative) antimicrobial use in the flock, and:
+where $U(i)$ is the (quantitative or qualitative) antimicrobial use in the flock.
+
+$AMU_{init}$ is the use that occurs at the begining of the cycle. It is uncertain if it has effect on the resistance during the whole production cycle. We test this hypothesis. It is defined as:
 
 $$AMU_{init}=\sum_{i=1}^{\delta}U(i)$$
 
 ```{r echo=FALSE, fig.width=7, fig.height=5}
 metramu = data.frame(x = seq(0,10,0.01), exp = 0.95*exp(-log(20)/(10-6))^seq(10,0,-0.01), step = c(rep(0.3, 451), rep(0, 550)))
 p = ggplot(data=metramu, aes(x=x))
-p = p + ggtitle("Metric for the past use of antibiotics: AMU(t) + AMU(init)")
+p = p + ggtitle("Metric for the past use of antibiotics (AMU(t) and AMU(init))")
 p = p + xlab("Weeks i") + theme(axis.title.y=element_blank())
 p = p + geom_ribbon(aes(ymin=0, ymax=pmax(exp, step)), alpha=0.3)
-p = p + geom_line(aes(y=exp), col="blue", size=1)
-p = p + geom_step(aes(y=step), col="red", size=1)
+p = p + geom_line(aes(y=exp, col="1"), size=1)
+p = p + geom_step(aes(y=step, col="2"), size=1)
 p = p + geom_line(aes(y=0.05), linetype="dashed")
 p = p + geom_line(aes(y=0.95), linetype="dashed")
 p = p + geom_point(aes(x=6, y=0.05), size=4, col="blue")
@@ -626,14 +637,52 @@ p = p + geom_text(aes(x=6, y=0.15, label = "t-beta"), parse = T, size=5, col="bl
 p = p + geom_text(aes(x=10, y=1, label = "t"), parse = T, size=5, col="black")
 p = p + geom_text(aes(x=-0.2, y=0.05, label = "epsilon"), parse = T, size=5, col="black")
 p = p + geom_text(aes(x=-0.2, y=0.95, label = "alpha"), parse = T, size=5, col="black")
+p = p + scale_color_manual(name="", values=c("1"="blue", "2"="red"), labels=c("1"="AMU(t)", "2"="AMU(init)"))
 p
 
 rm(metramu, p)
 ```
 
+
+## Variations of the model
+
+The full model described above is model 24. Models 1 to 23 are simplifications of model 24.
+
+|Models|Previous resistance   |AMU             |Introductions|
+|:----:|:--------------------:|:--------------:|:-----------:|
+|**1** |None                  |None            |None         |
+|**2** |Initial               |None            |None         |
+|**3** |Initial + Previous    |None            |None         |
+|**4** |None                  |Initial         |None         |
+|**5** |Initial               |Initial         |None         |
+|**6** |Initial + Previous    |Initial         |None         |
+|**7** |None                  |Recent          |None         |
+|**8** |Initial               |Recent          |None         |
+|**9** |Initial + Previous    |Recent          |None         |
+|**10**|None                  |Initial + Recent|None         |
+|**11**|Initial               |Initial + Recent|None         |
+|**12**|Initial + Previous    |Initial + Recent|None         |
+|**13**|None                  |None            |Possible     |
+|**14**|Initial               |None            |Possible     |
+|**15**|Initial + Previous    |None            |Possible     |
+|**16**|None                  |Initial         |Possible     |
+|**17**|Initial               |Initial         |Possible     |
+|**18**|Initial + Previous    |Initial         |Possible     |
+|**19**|None                  |Recent          |Possible     |
+|**20**|Initial               |Recent          |Possible     |
+|**21**|Initial + Previous    |Recent          |Possible     |
+|**22**|None                  |Initial + Recent|Possible     |
+|**23**|Initial               |Initial + Recent|Possible     |
+|**24**|Initial + Previous    |Initial + Recent|Possible     |
+
+
+## Useful functions
+
 ### Function returning the minus loglikelihood
 
-This function enters the raw (transformed) values of the model's parameters, and returns either the minus loglikelihood (`aim="est"`), or the predicted and observed values of resistance and AMU, the minus loglikelihood and the true (not transformed) values of parameters (`aim="pred"`):
+This function enters the raw (transformed) values of the model's parameters, and returns either the minus loglikelihood (`aim="est"`), or the predicted and observed values of resistance and AMU, the minus loglikelihood and the true (not transformed) values of parameters (`aim="pred"`).
+
+We also define `run2_intr` which a wraper: its output is the function `run2` with the value of `intr` (input of `run2`) specified.
 
 ```{r}
 run2 = function(aim="est", intr=introd, distrib_res="normal", Sd=0.15, mu, lambda1, lambda2, alpha, beta, teta, delta, eta){
@@ -644,7 +693,7 @@ run2 = function(aim="est", intr=introd, distrib_res="normal", Sd=0.15, mu, lambd
   alpha = alpha
   beta = 10 * sigmoid(beta) +1
   teta = teta
-  delta = round(5 * sigmoid(delta)) +1
+  delta = 5 * sigmoid(delta) +1
   eta = sigmoid(eta)
 
   obsdat = resamu(nwkseff=beta, quantuse=F, tempo_amu="exp_decay", thresh_res=0.4, ignore.nul=F, lag_amu_init=delta, obj="est")
@@ -666,52 +715,67 @@ run2 = function(aim="est", intr=introd, distrib_res="normal", Sd=0.15, mu, lambd
   }
 }
 
+# Factory/Wrapper function (returns a function with one of the parameters ("intr") fixed)
+run2_intr <- function(x) {
+ function(aim="est", distrib_res="normal", Sd=0.15, mu, lambda1, lambda2, alpha, beta, teta, delta, eta)
+   run2(aim, intr=x, distrib_res, Sd, mu, lambda1, lambda2, alpha, beta, teta, delta, eta)
+}
+
+```
+
+### Function plotting a model's fit
+
+This function takes as input the fitted model, and returns a plot with one dot per observation: the observed resistance on x-axis, the predicted resistance on y-axis.
+
+```{r}
+fitplot = function(fitted_model, Sd = 0.15, intro){
+  fit_coef = coef(fitted_model)
+  
+  obs_vs_pred = run2(aim="pred", intr=intro, mu=fit_coef["mu"], lambda1=fit_coef["lambda1"], lambda2=fit_coef["lambda2"], alpha=fit_coef["alpha"], beta=fit_coef["beta"], teta=fit_coef["teta"], delta=fit_coef["delta"], eta=fit_coef["eta"])
+  
+  minll = obs_vs_pred[[2]]
+  print(paste("Minus LogLikelihood:", minll))
+  
+  true_fit_coef = obs_vs_pred[[3]]
+  print("True values of parameters:")
+  print(true_fit_coef)
+  
+  p = ggplot(obs_vs_pred[[1]], aes(x = auc, y = predmod, col = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, shape = as.logical(introduc)))
+  p = p + xlab("Observed resistance") + ylab("Predicted resistance")
+  p = p + ggtitle(paste0("Observed VS Predicted resistance (minus LogLikelihood =", round(minll, 2), ")"))
+  p = p + geom_segment(aes(xend = auc, y = pmax(0, predmod - 1.96*Sd), yend = pmin(1, predmod + 1.96*Sd)), col = "grey")
+  p = p + geom_abline(intercept = 0, slope = 1, linetype = "dashed")
+  p = p + geom_point()
+  p = p + labs(shape = "Introduction", col = "Global AMU metric")
+  p
+}
 ```
 
 ### Test of the estimation with simulated data
 
-### Example of Maximization step for one given introduction status
+### Example of estimation of the full model for one given introduction status
 
-Here, we test the model's estimation (M-step), with one given introduction status for each observatiob. We use "bbmle" package for point estimates, and if possible for confidence intervals and likelihood profiles.
+Here, we test the model's estimation (M-step), with one given introduction status for each observation. We use "bbmle" package for point estimates.
 
-```{r}
+```{r, fig.width=6, fig.height=4}
 introd = c(rep(0, 4), 1, 0, 1, 1, 1, rep(0, 6), 1, 0, 1, rep(0, 3), 1, 0, 0, 1, rep(0, 7), 1, 0, 0, 1, 1, 1, 0, 1, rep(0, 5), 1, rep(0, 3))
 
-fit_mle2 = mle2(minuslogl = run2, method = "Nelder-Mead", control = list(maxit = 5000), start = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1))))
+fit_mle2 = mle2(minuslogl = run2_intr(introd), method = "Nelder-Mead", control = list(maxit = 5000), start = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1))))
 
-fit_coef = coef(fit_mle2)
-
-# prof = profile(fit_mle2, std.err=0.05)
-# plot(prof)
-# conf = confint(fit_mle2, std.err=0.05)
-# print(conf)
-# vcov(fit_mle2)
-
-obs_vs_pred = run2(aim="pred", mu=fit_coef["mu"], lambda1=fit_coef["lambda1"], lambda2=fit_coef["lambda2"], alpha=fit_coef["alpha"], beta=fit_coef["beta"], teta=fit_coef["teta"], delta=fit_coef["delta"], eta=fit_coef["eta"])
-
-Sd = 0.15
-summary(fit_mle2)
-minll = obs_vs_pred[[2]]
-print(paste("Minus LogLikelihood:", minll))
-print("True values of parameters:")
-print(obs_vs_pred[[3]])
-p = ggplot(obs_vs_pred[[1]], aes(x = auc, y = predmod, col = obs_vs_pred[[3]]["alpha"]*amu_t + obs_vs_pred[[3]]["teta"]*amu_init, shape = as.logical(introduc)))
-p = p + xlab("Obs") + ylab("Pred")
-p = p + ggtitle(paste0("Observed VS Predicted AUC (minus LogLikelihood =", round(minll, 2), ")"))
-p = p + geom_segment(aes(xend = auc, y = pmax(0, predmod - 1.96*Sd), yend = pmin(1, predmod + 1.96*Sd)), col = "grey")
-p = p + geom_abline(intercept = 0, slope = 1, linetype = "dashed")
-p = p + geom_point() + labs(shape = "Introduction", col = "AMU")
-p
-
+fitplot(fitted_model = fit_mle2, intro = introd)
 ```
 
 ```{r}
-rm(p, obs_vs_pred, fit_mle2, Sd, minll, fit_coef, introd)
+rm(fit_coef, introd)
 ```
 
 ### Function repeating the fit several times
 
-This function repeats the model's fit process several times, to make sure the maximum of likelihood is not only local. It is made such that the random initialization of parameters is different from one repetition to another. Some parameters are transformed to be estimated in an interval.
+This function repeats the model's fit process several times, to make sure the maximum of likelihood is not only local. Among repetitions, the model with the highest likelihood is the one chosen by the function.
+
+The function takes as inputs the model's parameters that should be fixed (not estimated), and those that should be estimated. This is to adapt to the different variations of the model (see above). Some parameters are transformed to be estimated in an interval.
+
+It is made such that the random initialization of parameters is different from one repetition to another.
 
 ```{r}
 rep_est = function(nrep, minusloglrep, methodrep, controlrep, fixedvar, startvar){
@@ -729,51 +793,35 @@ rep_est = function(nrep, minusloglrep, methodrep, controlrep, fixedvar, startvar
   loglikrep = lapply(X=modrep, FUN=logLik)
   
   cat("\n")
-  return(modrep[[which.max(loglikrep)]])
+  
+  modrep[[which.max(loglikrep)]]
 }
 
 ```
 
-### Comparison of the models without introduction
-
-First, we fit models that do not take into account the introductions, so we do not need to implement the E-M algorithm. Because the package `bbmle` does not always find the likelihood maximum, we create a function to repeat the estimation several times, and take the maximum likelihood among these repetitions:
-
-```{r}
-lfit = list()
-
-lfit[[1]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu"))
-
-lfit[[2]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1"))
-
-lfit[[3]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2"))
-
-lfit[[4]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta"), startvar = c("mu", "teta", "delta"))
-
-lfit[[5]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "teta",  "delta"))
-
-lfit[[6]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta"))
-
-lfit[[7]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta"))
-
-lfit[[8]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta"))
-
-lfit[[9]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta"))
-
-lfit[[10]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2", "eta"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta"))
-
-lfit[[11]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta"))
-
-lfit[[12]] = rep_est(nrep=5, minusloglrep = run2, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"))
-
-list_loglik = lapply(X = lfit, FUN = logLik)
-list_loglik
-
-```
-
-
 ### Implementation of the full E-M algorithm
 
-Function for the E step:
+#### Function for the E step
+
+With one given set of parameters for the model, we determine what is the best "introduction" status (yes/no) for each observation.
+
+We first calculate the residuals $r_{intro}^i$ (`r_intro`) and $r_{nointro}^i$ (`r_nointro`) of observations $x_i$ (observed resistance) under the 2 models: $M_{intro}$ ("Only introductions") and $M_{nointro}$ ("No introduction").
+
+The idea is to compute, for each observation, the probability that it is assigned to each of the 2 models:
+
+$$p(x_i \in M_{intro}) = \frac{p(r_{intro}^i/x_i \in M_{intro})}{p(r_{intro}^i/x_i \in M_{intro}) + p(r_{nointro}^i/x_i \in M_{nointro})}$$
+
+And:
+
+$$p(x_i \in M_{nointro}) = 1-p(x_i \in M_{intro})$$
+
+As the residuals follow a normal distribution (with mean=0 and standard deviation $\sigma$ (`sigma`), fixed to 0.15):
+
+$$p(x_i \in M_{intro}) = \frac{exp(\frac{-(r_{intro}^i)^2}{\sigma^2})}{exp(\frac{-(r_{intro}^i)^2}{\sigma^2}) + exp(\frac{-(r_{nointro}^i)^2}{\sigma^2})}$$
+
+Then the introduction status (1/0) of each observation is assigned by drawing in a Bernoulli of parameter $p(x_i \in M_{intro})$.
+
+(Sources: http://www.cs.huji.ac.il/~yweiss/emTutorial.pdf ; http://www.di.fc.ul.pt/~jpn/r/EM/EM.html#eg-em-with-mix-of-two-linear-models)
 
 ```{r}
 E_step <- function(observed, params, sigma = 0.15) {
@@ -782,106 +830,85 @@ E_step <- function(observed, params, sigma = 0.15) {
   
   lin_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]])[["obsdat"]]$predmod
 
-  r_intro = abs(lin_intro - observed) # residuals
+  # Residuals of observations under models "Intro" and "No intro"
+  r_intro = abs(lin_intro - observed)
   r_nointro = abs(lin_nointro - observed)
 
-  exp_intro = exp(- r_intro^2/sigma^2)
-  exp_nointro = exp(- r_nointro^2/sigma^2)
+  # Residuals follow a normal distribution
+  exp_intro = exp(- r_intro^2/sigma^2) #(2*sigma^2))
+  exp_nointro = exp(- r_nointro^2/sigma^2) #(2*sigma^2))
 
   exp_intro = pmin(0.9999, exp_intro)
   exp_intro = pmax(0.0001, exp_intro)
   exp_nointro = pmin(0.9999, exp_nointro)
   exp_nointro = pmax(0.0001, exp_nointro)
 
-  prob_intro <- exp_intro / (exp_intro + exp_nointro)
+  # Probability of "Intro":
+  prob_intro = exp_intro / (exp_intro + exp_nointro)
 
   intr_status = rbinom(n = length(prob_intro), size = 1, prob = prob_intro)
   intr_status = as.logical(intr_status)
 
-  return(intr_status)
+  intr_status
 }
 ```
 
-Function for the M step:
+#### Function for the M step
+
+Given an introduction status for each observation, we fit the model. Depending on the model, some parameters can be fixed in the `mle2` function. Several repetitions of the fit are computed, with function `rep_est`.
 
 ```{r}
 M_step <- function(introd, modnum) {
 
   prop_intro = sum(introd)/length(introd)
   
-  redefine_run = function(aim="est", intr=introd, distrib_res="normal", Sd=0.15, mu, lambda1, lambda2, alpha, beta, teta, delta, eta){
-
-  mu = sigmoid(mu)
-  lambda1 = lambda1
-  lambda2 = lambda2
-  alpha = alpha
-  beta = 10 * sigmoid(beta) +1
-  teta = teta
-  delta = round(5 * sigmoid(delta)) +1
-  eta = sigmoid(eta)
-
-  obsdat = resamu(nwkseff=beta, quantuse=F, tempo_amu="exp_decay", thresh_res=0.4, ignore.nul=F, lag_amu_init=delta, obj="est")
-  obsdat = obsdat[! is.na(obsdat$auc),]
-  obsdat$init[is.na(obsdat$init)] = 0
-  obsdat$prev[is.na(obsdat$prev)] = 0
-  obsdat$introduc = intr
-
-  obsdat$predmod = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta * obsdat$introduc
-
-  if(aim == "est"){
-    if(distrib_res == "normal"){
-      return(-sum(dnorm(x=obsdat$auc, mean=obsdat$predmod, sd=Sd, log=T), na.rm=T))
-    }else if(distrib_res == "beta"){
-      return(-sum(dbeta(x=obsdat$auc+0.00001, shape1=shape, shape2=shape*(1.00001-obsdat$predmod)/(obsdat$predmod+0.00001), log=T), na.rm=T))
-    }
-  }else if (aim == "pred"){
-    return(list(obsdat = obsdat[,c("auc", "amu_init", "amu_t", "introduc", "predmod")], minll = -sum(dnorm(x=obsdat$auc, mean=obsdat$predmod, sd=Sd, log=T)), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta)))
-  }
-}
-  
   #####
   if(modnum == 13){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"), startvar = c("mu", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"), startvar = c("mu", "eta"))
   }else if(modnum == 14){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta"), startvar = c("mu",  "lambda1", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta"), startvar = c("mu",  "lambda1", "eta"))
   }else if(modnum == 15){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta"), startvar = c("mu",  "lambda1",  "lambda2", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta"), startvar = c("mu",  "lambda1",  "lambda2", "eta"))
   }else if(modnum == 16){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "alpha",  "beta"), startvar = c("mu",  "teta",  "delta", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "alpha",  "beta"), startvar = c("mu",  "teta",  "delta", "eta"))
   }else if(modnum == 17){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta"), startvar = c("mu",  "lambda1",  "teta",  "delta", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta"), startvar = c("mu",  "lambda1",  "teta",  "delta", "eta"))
   }else if(modnum == 18){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta", "eta"))
   }else if(modnum == 19){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta"), startvar = c("mu",  "alpha",  "beta", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta"), startvar = c("mu",  "alpha",  "beta", "eta"))
   }else if(modnum == 20){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta"), startvar = c("mu",  "lambda1",  "alpha",  "beta", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta"), startvar = c("mu",  "lambda1",  "alpha",  "beta", "eta"))
   }else if(modnum == 21){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta", "eta"))
   }else if(modnum == 22){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta", "eta"))
   }else if(modnum == 23){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta", "eta"))
   }else if(modnum == 24){
-    modstep = rep_est(nrep=5, minusloglrep = redefine_run, methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c(), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta"))
+    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c(), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta"))
   }
   #####
   
   raw_coef = coef(modstep)
-  ob_pred = redefine_run(aim="pred", mu=raw_coef["mu"], lambda1=raw_coef["lambda1"], lambda2=raw_coef["lambda2"], alpha=raw_coef["alpha"], beta=raw_coef["beta"], teta=raw_coef["teta"], delta=raw_coef["delta"], eta=raw_coef["eta"])
+  ob_pred = run2(aim="pred", intr=introd, mu=raw_coef["mu"], lambda1=raw_coef["lambda1"], lambda2=raw_coef["lambda2"], alpha=raw_coef["alpha"], beta=raw_coef["beta"], teta=raw_coef["teta"], delta=raw_coef["delta"], eta=raw_coef["eta"])
   
   raw_coef = c(raw_coef, p_intro = prop_intro)
   llmod = ob_pred[[2]]
   true_coef = ob_pred[[3]]
   
-  return(list(raw_coef, llmod, modstep, true_coef))
+  list(raw_coef, llmod, modstep, true_coef)
 }
 ```
 
-Function to launch the whole algorithm:
+#### Function to launch the whole algorithm
+
+We repeat the algorithm several times to make sure the whole space has been explored.
+
+Convergence is defined as: the distance between the likelihood and the former likelihood is less than 1, 3 times in a row.
 
 ```{r}
-EM_algo <- function(modnum, numb_rep_algo=1, tol=1, max.step=100) {
+EM_algo <- function(modnum, numb_rep_algo=5, tol=1, max.step=100) {
 
   repetalgo = list()
   repetalgo_minloglik = c()
@@ -927,58 +954,113 @@ EM_algo <- function(modnum, numb_rep_algo=1, tol=1, max.step=100) {
     repetalgo_minloglik[algorep_ite] = minloglik
   }
   
-return(repetalgo[[which.min(repetalgo_minloglik)]])
+repetalgo[[which.min(repetalgo_minloglik)]]
 }
 ```
 
-We launch the algorithm:
+### Test of the full E-M algorithm on one model
+
+We launch the algorithm for one of the models:
+
+```{r, fig.width=6, fig.height=4}
+results = EM_algo(modnum=19, numb_rep_algo=2)
+fitplot(fitted_model = results[[1]], intro = results[[3]])
+print(paste0("Probability of introduction: ", results[[2]][["p_intro"]]))
+```
+
+## Results
+
+### Estimation of models 1 to 12 without introduction
+
+First, we fit models that do not take into account the introductions, so we do not need to implement the E-M algorithm. Because the package `bbmle` does not always find the likelihood maximum, we repeat the estimation several times with `rep_est`, and take the maximum likelihood among these repetitions.
 
 ```{r}
-randseed = round(100*runif(n=1))
-set.seed(randseed)
-results = EM_algo(modnum=13, numb_rep_algo=2)
-summary(results[[1]])
-results[[5]]
-print(paste0("Probability of introduction: ", results[[2]][["p_intro"]]))
-print(paste0("Minus loglikelihood:", results[[4]]))
+introd = rep(0, 49)
+lfit = list()
+
+lfit[[1]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu"))
+
+lfit[[2]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1"))
+
+lfit[[3]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2"))
+
+lfit[[4]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta"), startvar = c("mu", "teta", "delta"))
+
+lfit[[5]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "teta",  "delta"))
+
+lfit[[6]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta"))
+
+lfit[[7]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta"))
+
+lfit[[8]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta"))
+
+lfit[[9]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta"))
+
+lfit[[10]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2", "eta"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta"))
+
+lfit[[11]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta"))
+
+lfit[[12]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"))
+
+rm(introd)
 
 ```
 
-We plot the results:
+### Parallel computation of the E-M algorithm for models 13 to 24
+
+If the parallel computation was already done, `par_alread_comp = T`.
 
 ```{r}
+par_alread_comp = T
+```
 
-Sd=0.15
+```{r}
+if(par_alread_comp){
+  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/resulpar.rdata")
+}else{
+  cl<-makeCluster(7)
+  clusterEvalQ(cl, list(library(pracma), library(bbmle)))
+  clusterExport(cl, c("E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  t = as.numeric(Sys.time())
+  resulpar = parLapply(cl, X=13:24, fun=EM_algo, numb_rep_algo=5)
+  stopCluster(cl)
+  as.numeric(Sys.time()) - t
+  
+  save(resulpar, file = "C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/resulpar.rdata")
+}
 
-fit_coef = coef(results[[1]])
-obs_vs_pred = run2(aim="pred", intr=results[[3]], mu=fit_coef["mu"], lambda1=fit_coef["lambda1"], lambda2=fit_coef["lambda2"], alpha=fit_coef["alpha"], beta=fit_coef["beta"], teta=fit_coef["teta"], delta=fit_coef["delta"], eta=fit_coef["eta"])
+for(m in 1:12){lfit[[m+12]] = resulpar[[m]][[1]]}
 
-minll = obs_vs_pred[[2]]
-print(paste("Minus LogLikelihood:", minll))
-print("True values of parameters:")
-print(obs_vs_pred[[3]])
-p = ggplot(obs_vs_pred[[1]], aes(x = auc, y = predmod, shape = as.logical(introduc), col = obs_vs_pred[[3]]["alpha"]*amu_t + obs_vs_pred[[3]]["teta"]*amu_init))
-p = p + xlab("Obs") + ylab("Pred")
-p = p + ggtitle(paste0("Observed VS Predicted AUC (minus LogLikelihood =", round(minll, 2), ")"))
-p = p + geom_segment(aes(xend = auc, y = pmax(0, predmod - 1.96*Sd), yend = pmin(1, predmod + 1.96*Sd)), col = "grey")
-p = p + geom_abline(intercept = 0, slope = 1, linetype = "dashed")
-p = p + geom_point(size=2) + labs(shape = "Introduction")
+rm(par_alread_comp, m)
+```
+
+### Comparison of the models
+
+The list `lfit` contains the 24 fitted models. We compare and plot their loglikelihood and AIC (adding an interval for showing AIC +/-3).
+
+```{r, fig.width=8, fig.height=6}
+l_loglik = lapply(X = lfit, FUN = logLik)
+l_aic = lapply(X = lfit, FUN = AIC)
+
+plot_aic_ll = data.frame(mod = as.factor(1:24), AIC = unlist(l_aic), MinusLogLikelihood = -unlist(l_loglik))
+plot_aic_ll = melt(plot_aic_ll, id = "mod")
+
+p = ggplot(data = plot_aic_ll, aes(y = mod))
+p = p + ggtitle("Comparison of the fitted models") + xlab("Indicator value") + ylab("Models")
+p = p + geom_segment(data = plot_aic_ll[plot_aic_ll$variable == "AIC",], aes(x = value-3, xend = value+3, yend = mod), col = "grey")
+p = p + geom_vline(data = subset(plot_aic_ll, variable == "AIC"), aes(xintercept = min(plot_aic_ll$value[plot_aic_ll$variable == "AIC"])), linetype = "dashed")
+p = p + geom_vline(data = subset(plot_aic_ll, variable == "MinusLogLikelihood"), aes(xintercept = min(plot_aic_ll$value[plot_aic_ll$variable == "MinusLogLikelihood"])), linetype = "dashed")
+p = p + geom_point(aes(x = value), shape=18, size=2)
+p = p + facet_wrap(~variable, scales = "free_x")
+p = ggplotly(p)
 p
 
-# ggplot(obs_vs_pred[[1]], aes(x=amu, y=auc, col=as.logical(introduc))) + geom_point() + xlab("Metric for AMU") + ylab("Measure of resistance (area under curve)") + labs(col = "Introduction")
-
+rm(p, plot_aic_ll)
 ```
 
-### Comparison of the models:
+We can perform a Likelihood Ratio Test between 2 nested models:
 
 ```{r}
-bbmle::anova(lfit[[13]], lfit[[19]]) # Best among 1 to 12: model 7 (and 8 but more parameters)
+bbmle::anova(lfit[[13]], lfit[[14]])
 
-for(m in c(13:15, 19:21)){
-  print(m)
-  print(logLik(lfit[[m]]))
-  # print(AIC(lfit[[m]]))
-}
 ```
-
-### Comparison of the contributions of "amu", "init" and "introd" variables to the output
