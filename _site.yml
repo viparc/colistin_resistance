@@ -7,3 +7,5 @@ navbar:
       href: index.html
     - text: "Data generation"
       href: make_data.html
+    - text: "Model"
+      href: Analysis_col_res.html
