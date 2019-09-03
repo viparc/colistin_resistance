@@ -54,7 +54,7 @@ options(width = 137)
 
 The objective is to understand the relative contributions of different factors to the colistin resistance detected in samples from ViParc chicken farms:
 
-* antimicrobial use (AMU), particularly colistin ue
+* antimicrobial use (AMU)
 * the carriage of colistin resistance in day-old chicks
 * introductions of resistant strains from outside the flock (other flocks, environment, human-poultry transmission)
 
@@ -89,10 +89,10 @@ library(plotly)
 We load data:
 
 * `viparc_data_quali` and `viparc_data_quanti`: Includes production cycles, AMU (resp. qualitative and quantitative), sampling dates in ViParc farms.
-* `gcur`: Optical density (growth curves) measured in the samples at different times
+* `gcur`: Optical density (growth curves) measured in the samples at different times, at different colistin concentrations
 * `mic_data`: MIC for each sample
 
-```{r, cache=T}
+```{r}
 # viparc_data_quali = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_qualitative.csv")
 # viparc_data_quanti = read.csv("https://raw.githubusercontent.com/viparc/colistin_resistance/master/data/viparc_quantitative.csv")
 
@@ -111,7 +111,7 @@ id_matrix = mic_data[,c("ID", "FarmID", "Flockseq")]
 
 ## Choose type of resistance data: growth curves or MIC
 
-Here, we decide which resistance data we analyze: "growth_curves" or "mic":
+Here, we decide which resistance data we analyze: "growth_curves" or "mic". The final object for resistance data will be `res_data`, with values ranging between 0 (lowest observed resistance) and 1 (highest observed resistance).
 
 ```{r}
 type_res_data = "growth_curves"
@@ -123,17 +123,15 @@ if(type_res_data == "mic"){
   rownames(res_data) = mic_data$ID
   colnames(res_data) = c("S", "M", "E")
   res_data = (res_data - min(res_data, na.rm=T))/(max(res_data, na.rm=T) - min(res_data, na.rm=T))
-  
-  rm(gcur)
 }
 
 ```
 
 ## Resistance data: determine which Optical Density dataset to use
 
-This is the case we chose growth curves as a measure of resistance in samples. We use `gcur`. Let us plot the growth curves for each concentration. We remove concentrations 3 and 6, as too few OD were measured for these concentrations.
+This part is computed only in the case we chose growth curves as a measure of resistance in samples. We use `gcur`. Let us first plot the growth curves for each concentration. We remove concentrations 3 and 6, as too few OD were measured for these concentrations.
 
-```{r, cache=T}
+```{r, fig.width=6, fig.height=4}
 if(type_res_data == "growth_curves"){
   
   gcur = melt(gcur, id.vars = c("SampleID", "Conc.", "FlockID", "SamplPoint", "Repeat"), variable.name = "Time")
@@ -150,7 +148,7 @@ if(type_res_data == "growth_curves"){
   p = p + xlab("Time (hours)") + ylab("OD (optical density)")
   p = p + geom_line(aes(y=value), col="grey")
   p = p + facet_wrap(~Conc.)
-  p
+  plot(p)
   
   rm(p)
 }
@@ -162,7 +160,7 @@ For these concentrations (1, 2 and 4), we compute the area under curve (AUC), fo
 
 To measure how much the distributions of AUC are spread out for each concentration, we use the ["van der Eijk's A" statistic](https://en.wikipedia.org/wiki/Multimodal_distribution#van_der_Eijk's_A).  It ranges between -1 (perfect bimodality of the distribution) to +1 (perfect unimodality). A value of 0 corresponds to a uniform distribution. We select the concentration for which this statistic is closest to 0, because we aim to have both a spread distribution, and intermediary values of AUC (between high AUC - resistant samples - and low AUC - not resistant samples). We use package `agrmt`.
 
-```{r, cache=T}
+```{r, label="Calculating van der Eijk's A"}
 if(type_res_data == "growth_curves"){
   
   VdE_A_score = function(conc, t_start, t_end){
@@ -222,7 +220,7 @@ if(type_res_data == "growth_curves"){
 }
 ```
 
-No matters if the resistance metric we chose is "growth_curves" or "mic", the measure is between 0 (lowest resistance) and 1 (highest resistance). We print the first rows of the resistance dataset:
+No matters if the resistance metric we chose is "growth_curves" or "mic", the measure is between 0 (lowest resistance) and 1 (highest resistance). We print the first rows of the resistance dataset `res_data`:
 
 ```{r}
 print(head(res_data))
@@ -599,14 +597,14 @@ The algorithm is initiated with a random set of parameters, and is terminated wh
 
 For all observations in the 2nd or 3rd round of samplings, we define a model used in the Maximization step. Several models are tested, all being simplified versions of this full model:
 
-$$AUC_t = \sum_{k \in \{ t_1 ; t_2 \} }(\lambda_k.AUC_k) + \eta.f(t) + \alpha.AMU_t + \theta.AMU_{init} + \mu$$
+$$R_t = \sum_{k \in \{ t_1 ; t_2 \} }(\lambda_k.R_k) + \eta.f(t) + \alpha.AMU_t + \theta.AMU_{init} + \mu$$
 where:
 
-* $AUC$ is the measure of sample's resistance
+* $R$ is the measure of sample's resistance
 * $t$ is the week the sample was collected
-* $AUC_{t_1}$ is the measure of resistance in the initial sample of the same flock
+* $R_{t_1}$ is the measure of resistance in the initial sample of the same flock
+* $R_{t_2}$ is the measure of resistance in the previous sample if the observation belongs to the 3rd round of sampling (autocorrelation)
 * $f(t)=1$ if an introduction occurred before the sampling (between $t-\xi$ and $t-1$), and $f(t)=0$ otherwise
-* $AUC_{t_2}$ is the measure of resistance in the previous sample if the observation belongs to the 3rd round of sampling (autocorrelation)
 * $\mu$ is the average resistance when all other variables are null.
 
 The AMU metric $AMU_t$ is the use that just precedes the sampling date, and is defined as:
@@ -682,7 +680,7 @@ The full model described above is model 24. Models 1 to 23 are simplifications o
 
 This function enters the raw (transformed) values of the model's parameters, and returns either the minus loglikelihood (`aim="est"`), or the predicted and observed values of resistance and AMU, the minus loglikelihood and the true (not transformed) values of parameters (`aim="pred"`).
 
-We also define `run2_intr` which a wraper: its output is the function `run2` with the value of `intr` (input of `run2`) specified.
+We also define `run2_intr` which is a wraper: its output is the function `run2` with the value of `intr` (input of `run2`) specified.
 
 ```{r}
 run2 = function(aim="est", intr=introd, distrib_res="normal", Sd=0.15, mu, lambda1, lambda2, alpha, beta, teta, delta, eta){
@@ -757,7 +755,7 @@ fitplot = function(fitted_model, Sd = 0.15, intro){
 
 Here, we test the model's estimation (M-step), with one given introduction status for each observation. We use "bbmle" package for point estimates.
 
-```{r, fig.width=6, fig.height=4}
+```{r, label="Test full model estimation", fig.width=6, fig.height=4}
 introd = c(rep(0, 4), 1, 0, 1, 1, 1, rep(0, 6), 1, 0, 1, rep(0, 3), 1, 0, 0, 1, rep(0, 7), 1, 0, 0, 1, 1, 1, 0, 1, rep(0, 5), 1, rep(0, 3))
 
 fit_mle2 = mle2(minuslogl = run2_intr(introd), method = "Nelder-Mead", control = list(maxit = 5000), start = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1))))
@@ -766,7 +764,7 @@ fitplot(fitted_model = fit_mle2, intro = introd)
 ```
 
 ```{r}
-rm(fit_coef, introd)
+rm(introd)
 ```
 
 ### Function repeating the fit several times
@@ -805,21 +803,21 @@ rep_est = function(nrep, minusloglrep, methodrep, controlrep, fixedvar, startvar
 
 With one given set of parameters for the model, we determine what is the best "introduction" status (yes/no) for each observation.
 
-We first calculate the residuals $r_{intro}^i$ (`r_intro`) and $r_{nointro}^i$ (`r_nointro`) of observations $x_i$ (observed resistance) under the 2 models: $M_{intro}$ ("Only introductions") and $M_{nointro}$ ("No introduction").
+We first calculate the residuals $r_{intro}^i$ (`r_intro`) and $r_{nointro}^i$ (`r_nointro`) of observations $R_i$ (observed resistance) under the 2 models: $M_{intro}$ ("Only introductions") and $M_{nointro}$ ("No introduction").
 
 The idea is to compute, for each observation, the probability that it is assigned to each of the 2 models:
 
-$$p(x_i \in M_{intro}) = \frac{p(r_{intro}^i/x_i \in M_{intro})}{p(r_{intro}^i/x_i \in M_{intro}) + p(r_{nointro}^i/x_i \in M_{nointro})}$$
+$$p(R_i \in M_{intro}) = \frac{p(r_{intro}^i/R_i \in M_{intro})}{p(r_{intro}^i/R_i \in M_{intro}) + p(r_{nointro}^i/R_i \in M_{nointro})}$$
 
 And:
 
-$$p(x_i \in M_{nointro}) = 1-p(x_i \in M_{intro})$$
+$$p(R_i \in M_{nointro}) = 1-p(R_i \in M_{intro})$$
 
 As the residuals follow a normal distribution (with mean=0 and standard deviation $\sigma$ (`sigma`), fixed to 0.15):
 
-$$p(x_i \in M_{intro}) = \frac{exp(\frac{-(r_{intro}^i)^2}{\sigma^2})}{exp(\frac{-(r_{intro}^i)^2}{\sigma^2}) + exp(\frac{-(r_{nointro}^i)^2}{\sigma^2})}$$
+$$p(R_i \in M_{intro}) = \frac{exp(\frac{-(r_{intro}^i)^2}{\sigma^2})}{exp(\frac{-(r_{intro}^i)^2}{\sigma^2}) + exp(\frac{-(r_{nointro}^i)^2}{\sigma^2})}$$
 
-Then the introduction status (1/0) of each observation is assigned by drawing in a Bernoulli of parameter $p(x_i \in M_{intro})$.
+Then the introduction status (1/0) of each observation is assigned by drawing in a Bernoulli of parameter $p(R_i \in M_{intro})$.
 
 (Sources: http://www.cs.huji.ac.il/~yweiss/emTutorial.pdf ; http://www.di.fc.ul.pt/~jpn/r/EM/EM.html#eg-em-with-mix-of-two-linear-models)
 
@@ -962,19 +960,20 @@ repetalgo[[which.min(repetalgo_minloglik)]]
 
 We launch the algorithm for one of the models:
 
-```{r, fig.width=6, fig.height=4}
+```{r, label="E-M algorithm on one model", fig.width=6, fig.height=4}
 results = EM_algo(modnum=19, numb_rep_algo=2)
 fitplot(fitted_model = results[[1]], intro = results[[3]])
 print(paste0("Probability of introduction: ", results[[2]][["p_intro"]]))
+
 ```
 
 ## Results
 
 ### Estimation of models 1 to 12 without introduction
 
-First, we fit models that do not take into account the introductions, so we do not need to implement the E-M algorithm. Because the package `bbmle` does not always find the likelihood maximum, we repeat the estimation several times with `rep_est`, and take the maximum likelihood among these repetitions.
+First, we fit models that do not take into account the introductions, so we do not need to implement the E-M algorithm. Because the package `bbmle` does not always find the likelihood maximum, we repeat the estimation 10 times with `rep_est`, and take the maximum likelihood among these repetitions. The list `lfit` contains all fitted models.
 
-```{r}
+```{r, label="Estimation of the models without introduction"}
 introd = rep(0, 49)
 lfit = list()
 
@@ -1008,13 +1007,15 @@ rm(introd)
 
 ### Parallel computation of the E-M algorithm for models 13 to 24
 
+We repeat the algorithm 5 times (with different seeds) per model, and each maximization step (model fit) is repeated 5 times (with different seeds too) to make sure the likelihood maximum is reached. This number of repetition is the one generally adopted in MCMC estimation (2-4 chains). These values were also chosen in order to obtain a reasonable computation time on our machine: about 8 hours.
+
 If the parallel computation was already done, `par_alread_comp = T`.
 
 ```{r}
 par_alread_comp = T
 ```
 
-```{r}
+```{r, label="E-M algorithm on all models"}
 if(par_alread_comp){
   load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/resulpar.rdata")
 }else{
@@ -1036,7 +1037,7 @@ rm(par_alread_comp, m)
 
 ### Comparison of the models
 
-The list `lfit` contains the 24 fitted models. We compare and plot their loglikelihood and AIC (adding an interval for showing AIC +/-3).
+The list `lfit` contains the 24 fitted models. We compare and plot their loglikelihood and AIC (adding an interval for showing AIC +/-3). It is possible de zoom on the graph as it is a plotly figure.
 
 ```{r, fig.width=8, fig.height=6}
 l_loglik = lapply(X = lfit, FUN = logLik)
@@ -1064,3 +1065,42 @@ We can perform a Likelihood Ratio Test between 2 nested models:
 bbmle::anova(lfit[[13]], lfit[[14]])
 
 ```
+
+### Discussion
+
+Model 13 has the lowest AIC. Models 14, 15 and 19 seem to be equivalent in term of AIC (the -/+3 interval includes the value of model 13). Models 16, 20 and 21 also have close AIC values.
+
+We perform Likelihood Ratio Tests in these models, pair by pair, when they are nested.
+
+```{r}
+bbmle::anova(lfit[[13]], lfit[[14]])
+bbmle::anova(lfit[[13]], lfit[[15]])
+bbmle::anova(lfit[[13]], lfit[[16]])
+bbmle::anova(lfit[[13]], lfit[[20]])
+bbmle::anova(lfit[[13]], lfit[[21]])
+
+```
+
+Model 13 seems to explain best the data, and it is not significant to add variables to complexify model 13.
+
+Model 13 is the model that takes only account the introductions (no AMU, no effect of the previous resistance). It is likely that the E-M algorithm simply assigns a status of introduction when the observed resistance is high, and a status of no-introduction when the observed resistance is low. It seems uncertain wether it is because AMU and previous resistance have no effect.
+
+#### Analysis alternative
+
+A way to perform the analysis would be to:
+
+1) Compare models without introduction (models 1 to 12)
+2) Among the best of them (lowest AIC), compute the E-M algorithm to check if adding introductions improves the fit
+3) Compare the models that are left
+
+Here, among models 1-12, we would select models 7, 8 and 9, and perform the E-M algorithm with them only. In the end, we would therefore compare models 7, 8, 9, 19, 20 and 21.
+
+Models 19, 20 and 21 have lower - and quite similar - AIC. Lets us perform Likelihood Ratio Tests:
+
+```{r}
+bbmle::anova(lfit[[19]], lfit[[20]])
+bbmle::anova(lfit[[19]], lfit[[21]])
+
+```
+
+In this case, model 19 is the final model chosen. It includes an effect of the introductions and recent AMU, but no effect of the previous resistance and of the initial AMU.
