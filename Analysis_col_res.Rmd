@@ -506,7 +506,7 @@ resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore
   obtab$res = obtab$auc >= thresh_res
 
   if(obj == "plot"){
-    p = ggplot(data=obtab, aes(x=amu_init+amu_t, y=auc, col=init))
+    p = ggplot(data=obtab, aes(x=amu_t, y=auc, col=init))
     p = p + xlab("All antibiotics use metric") + ylab("Area under curve")
     p = p + ggtitle(paste0("Pearson correlation: ", round(cor(obtab$amu_init + obtab$amu_t, obtab$auc, use="complete.obs"), 3), " (", nrow(na.omit(obtab)), " complete observations, including ", round(sum(obtab$auc >= thresh_res, na.rm=T)*100/nrow(na.omit(obtab))), "% above threshold)"))
     p = p + geom_point()
@@ -521,9 +521,9 @@ resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore
 
 ```
 
-Shiny interface:
+Here, either we run an interactive Shiny app, or we plot a simple graph showing on the y-axis the measured resistance, and on the x-axis the AMU (qualitative, all classes) in the last 3 days before each sampling, with an exponential decay of the effect of antibiotics. The color is the value of resistance in the initial sample of the production cycle (week 1). This is to observe the graphical association between resistance and AMU, and the group of observations for which resistance is high but AMU is low. For the last ones, we want to test if this high resistance could be explained by introductions.
 
-```{r}
+```{r, fig.width=7, fig.height=5}
 ui <- fluidPage({
   titlePanel("Correlation between past use and AUC")
   sidebarLayout(
@@ -574,13 +574,14 @@ server <- function(input, output){
     resamu(nwkseff=input$nwkseff, lag_amu_init=input$lag_amu_init, expo=input$expo, quantuse=input$quantuse, tempo_amu=input$tempo_amu, thresh_res=input$thresh_res, ignore.nul=input$ignore.nul)
   })
 }
-```
 
-To launch Shiny app (not active on the simple html knit of the Rmd file):
-
-```{r}
-# shinyApp(ui=ui, server=server)
-rm(ui, server)
+run_shiny = F
+if(run_shiny){
+  shinyApp(ui=ui, server=server)
+}else{
+  resamu(nwkseff = 3, quantuse = F, tempo_amu="exp_decay", thresh_res = 0.5, lag_amu_init = 1, obj="plot", expo="allab")
+}
+rm(ui, server, run_shiny)
 ```
 
 # Analysis
@@ -959,6 +960,7 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=1, max.step=100) {
         counting_for_convergence = 0
       }
     }
+    write.table(c(), file=paste0("C:/Users/Jonathan/Desktop/Model ", modnum, " completed.txt"))
     print(paste0("Final step: ", step)); cat("\n")
     
     repetalgo[[algorep_ite]] = list(modstep, raw_params, introductions, minloglik, param_true_format, number_obs=length(obs_res))
@@ -974,47 +976,58 @@ repetalgo[[which.min(repetalgo_minloglik)]]
 We launch the algorithm for one of the models:
 
 ```{r, label="E-M algorithm on one model", fig.width=6, fig.height=4}
-results = EM_algo(modnum=19, numb_rep_algo=1)
-fitplot(fitted_model = results[[1]], intro = results[[3]])
-print(paste0("Probability of introduction: ", results[[2]][["p_intro"]]))
-
-rm(results)
+# results = EM_algo(modnum=19, numb_rep_algo=1)
+# fitplot(fitted_model = results[[1]], intro = results[[3]])
+# print(paste0("Probability of introduction: ", results[[2]][["p_intro"]]))
+# 
+# rm(results)
 
 ```
 
 ## Results
+
+If the computation was already done, `alread_comp = T`.
+
+```{r}
+alread_comp = T
+```
 
 ### Estimation of models 1 to 12 without introduction
 
 First, we fit models that do not take into account the introductions, so we do not need to implement the E-M algorithm. Because the package `bbmle` does not always find the likelihood maximum, we repeat the estimation 10 times with `rep_est`, and take the maximum likelihood among these repetitions. The list `lfit` contains all fitted models.
 
 ```{r, label="Estimation of the models without introduction"}
-introd = 0
-lfit = list()
 
-lfit[[1]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
-
-lfit[[2]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1", "Sd"))
-
-lfit[[3]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2", "Sd"))
-
-lfit[[4]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta"), startvar = c("mu", "teta", "delta", "Sd"))
-
-lfit[[5]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "teta",  "delta", "Sd"))
-
-lfit[[6]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta", "Sd"))
-
-lfit[[7]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
-
-lfit[[8]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta", "Sd"))
-
-lfit[[9]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta", "Sd"))
-
-lfit[[10]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2", "eta"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta", "Sd"))
-
-lfit[[11]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta", "Sd"))
-
-lfit[[12]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta", "Sd"))
+if(alread_comp){
+  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/lfit.rdata")
+}else{
+  introd = 0
+  lfit = list()
+  
+  lfit[[1]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
+  
+  lfit[[2]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1", "Sd"))
+  
+  lfit[[3]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2", "Sd"))
+  
+  lfit[[4]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta"), startvar = c("mu", "teta", "delta", "Sd"))
+  
+  lfit[[5]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "teta",  "delta", "Sd"))
+  
+  lfit[[6]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta", "Sd"))
+  
+  lfit[[7]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
+  
+  lfit[[8]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta", "Sd"))
+  
+  lfit[[9]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta", "Sd"))
+  
+  lfit[[10]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2", "eta"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta", "Sd"))
+  
+  lfit[[11]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta", "Sd"))
+  
+  lfit[[12]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta", "Sd"))
+}
 
 rm(introd)
 
@@ -1022,16 +1035,11 @@ rm(introd)
 
 ### Parallel computation of the E-M algorithm for models 13 to 24
 
-We repeat the algorithm 5 times (with different seeds) per model, and each maximization step (model fit) is repeated 5 times (with different seeds too) to make sure the likelihood maximum is reached. This number of repetition is the one generally adopted in MCMC estimation (2-4 chains). These values were also chosen in order to obtain a reasonable computation time on our machine: about 8 hours.
-
-If the parallel computation was already done, `par_alread_comp = T`.
-
-```{r}
-par_alread_comp = F
-```
+We repeat the algorithm 5 times (with different seeds) per model, and each maximization step (model fit) is repeated 5 times (with different seeds too) to make sure the likelihood maximum is reached. These values were also chosen in order to obtain a reasonable computation time on our machine.
 
 ```{r, label="E-M algorithm on all models"}
-if(par_alread_comp){
+
+if(alread_comp){
   load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/resulpar.rdata")
 }else{
   cl<-makeCluster(7)
@@ -1043,121 +1051,87 @@ if(par_alread_comp){
   as.numeric(Sys.time()) - t
   
   save(resulpar, file = "C:/Users/Jonathan/Desktop/resulpar.rdata")
+  
+  for(m in 1:12){lfit[[m+12]] = resulpar[[m]][[1]]}
+  save(lfit, file = "C:/Users/Jonathan/Desktop/lfit.rdata")
+  rm(m)
 }
 
-for(m in 1:12){lfit[[m+12]] = resulpar[[m]][[1]]}
-
-rm(par_alread_comp, m)
+rm(alread_comp)
 ```
 
 ### Comparison of the models
 
-The list `lfit` contains the 24 fitted models. We compare and plot their loglikelihood and AIC (adding an interval for showing AIC +/-3). It is possible de zoom on the graph as it is a plotly figure.
+The list `lfit` contains the 24 fitted models. We compare and plot their loglikelihood and AIC weights (= probability that each model is the best).
 
 ```{r, fig.width=8, fig.height=6}
 l_loglik = unlist(lapply(X = lfit, FUN = logLik))
 l_aic = unlist(lapply(X = lfit, FUN = AIC))
-l_aic[13:24] = l_aic[13:24] + 49 #resulpar[[1]][["number_obs"]]
+l_aic[13:24] = l_aic[13:24] + resulpar[[1]][["number_obs"]]
 
-# l_aic = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
+l_aic = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
 
-plot_aic_ll = data.frame(mod = as.factor(1:24), AIC = l_aic, MinusLogLikelihood = -l_loglik)
+plot_aic_ll = data.frame(mod = as.factor(1:24), AIC_weights = l_aic, MinusLogLikelihood = -l_loglik)
 plot_aic_ll = melt(plot_aic_ll, id = "mod")
 
 p = ggplot(data = plot_aic_ll, aes(y = mod))
 p = p + ggtitle("Comparison of the fitted models") + xlab("Indicator value") + ylab("Models")
-# p = p + geom_segment(data = plot_aic_ll[plot_aic_ll$variable == "AIC",], aes(x = value-3, xend = value+3, yend = mod), col = "grey")
-p = p + geom_vline(data = subset(plot_aic_ll, variable == "AIC"), aes(xintercept = min(plot_aic_ll$value[plot_aic_ll$variable == "AIC"])), linetype = "dashed")
+p = p + geom_vline(data = subset(plot_aic_ll, variable == "AIC_weights"), aes(xintercept = min(plot_aic_ll$value[plot_aic_ll$variable == "AIC_weights"])), linetype = "dashed")
 p = p + geom_vline(data = subset(plot_aic_ll, variable == "MinusLogLikelihood"), aes(xintercept = min(plot_aic_ll$value[plot_aic_ll$variable == "MinusLogLikelihood"])), linetype = "dashed")
 p = p + geom_point(aes(x = value), shape=18, size=2)
 p = p + facet_wrap(~variable, scales = "free_x")
 p = ggplotly(p)
 p
 
-rm(p, plot_aic_ll)
+rm(p, plot_aic_ll, l_loglik, l_aic)
 ```
+
+Models 13 and 19 have the highest AIC weights (= lowest AIC). We plot their fit (observed VS predicted):
+
+```{r, fig.width=6, fig.height=4}
+fitplot(fitted_model = resulpar[[1]][[1]], intro = resulpar[[1]][[3]])
+fitplot(fitted_model = resulpar[[7]][[1]], intro = resulpar[[7]][[3]])
+
+```
+
+We can perform a Likelihood Ratio Test between models 13 and 19:
 
 ```{r}
-# Step 1:
-
-# with - without introductions:
-mean(l_aic[c(13:24)]) - mean(l_aic[-c(13:24)])
-
-# with - without initial AMU:
-mean(l_aic[c(4:6, 10:12, 16:18, 22:24)]) - mean(l_aic[-c(4:6, 10:12, 16:18, 22:24)])
-
-# with - without recent AMU:
-mean(l_aic[c(7:12, 19:24)]) - mean(l_aic[-c(7:12, 19:24)])
-
-# with - without initial resistance:
-mean(l_aic[c(2,3,5,6,8,9,11,12,14,15,17,18,20,21,23,24)]) - mean(l_aic[-c(2,3,5,6,8,9,11,12,14,15,17,18,20,21,23,24)])
-
-# with - without previous resistance
-
-# Step 2 with intro:
-l_aic_withintro = l_aic[13:24]
-
-# with intro, with - without initial AMU:
-mean(l_aic_withintro[c(4:6, 10:12)]) - mean(l_aic_withintro[-c(4:6, 10:12)])
-
-# with intro, with - without recent AMU:
-mean(l_aic_withintro[c(7:12)]) - mean(l_aic_withintro[-c(7:12)])
-
-# with intro, with - without initial resistance:
-mean(l_aic_withintro[c(2,3,5,6,8,9,11,12)]) - mean(l_aic_withintro[-c(2,3,5,6,8,9,11,12)])
-
-# Step 3 with intro and recent AMU:
-
-# with intro and recent AMU, with - without initial AMU:
-mean(l_aic[c(22:24)]) - mean(l_aic[c(19:21)])
-
-# with intro and recent AMU, with - without initial resistance:
-mean(l_aic[c(20,21,23,24)]) - mean(l_aic[c(19,22)])
+bbmle::anova(lfit[[13]], lfit[[19]])
 
 ```
 
-We can perform a Likelihood Ratio Test between 2 nested models:
+In conclusion, model 19 (introductions + recent AMU) seem to explain best the data, followed closely by model 13 (introductions only). With the LRT, it is not significant to add variables to complexify model 13.
 
-```{r}
-bbmle::anova(lfit[[13]], lfit[[14]])
+### Analysis alternative
 
-```
-
-### Discussion
-
-Model 13 has the lowest AIC. Models 14, 15 and 19 seem to be equivalent in term of AIC (the -/+3 interval includes the value of model 13). Models 16, 20 and 21 also have close AIC values.
-
-We perform Likelihood Ratio Tests in these models, pair by pair, when they are nested.
-
-```{r}
-bbmle::anova(lfit[[13]], lfit[[14]])
-bbmle::anova(lfit[[13]], lfit[[15]])
-bbmle::anova(lfit[[13]], lfit[[16]])
-bbmle::anova(lfit[[13]], lfit[[20]])
-bbmle::anova(lfit[[13]], lfit[[21]])
-
-```
-
-Model 13 seems to explain best the data, and it is not significant to add variables to complexify model 13.
-
-Model 13 is the model that takes only account the introductions (no AMU, no effect of the previous resistance). It is likely that the E-M algorithm simply assigns a status of introduction when the observed resistance is high, and a status of no-introduction when the observed resistance is low. It seems uncertain wether it is because AMU and previous resistance have no effect.
-
-#### Analysis alternative
-
-A way to perform the analysis would be to:
+A way to perform the analysis could also be to:
 
 1) Compare models without introduction (models 1 to 12)
-2) Among the best of them (lowest AIC), compute the E-M algorithm to check if adding introductions improves the fit
+2) Among the best of them (highest AIC weight), compute the E-M algorithm to check if adding introductions improves the fit
 3) Compare the models that are left
 
-Here, among models 1-12, we would select models 7, 8 and 9, and perform the E-M algorithm with them only. In the end, we would therefore compare models 7, 8, 9, 19, 20 and 21.
+Among models 1-12, we compare AIC weights:
 
-Models 19, 20 and 21 have lower - and quite similar - AIC. Lets us perform Likelihood Ratio Tests:
+```{r, fig.width=8, fig.height=6}
+l_aic = unlist(lapply(X = lfit[1:12], FUN = AIC))
 
-```{r}
-bbmle::anova(lfit[[19]], lfit[[20]])
-bbmle::anova(lfit[[19]], lfit[[21]])
+l_aic = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
 
+print(l_aic)
+rm(l_aic)
 ```
 
-In this case, model 19 is the final model chosen. It includes an effect of the introductions and recent AMU, but no effect of the previous resistance and of the initial AMU.
+we select models 7 (AIC weight = 44.3%) and 8 (AIC weight = 23.2%), and perform the E-M algorithm with them only. In the end, we therefore compare models 7, 8, 19 and 20:
+
+
+```{r, fig.width=8, fig.height=6}
+l_aic = unlist(lapply(X = lfit[c(7,8,19,20)], FUN = AIC))
+
+l_aic = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
+
+print(l_aic)
+rm(l_aic)
+```
+
+In this case, model 19 (AIC weight = 73%) is the final model chosen.
