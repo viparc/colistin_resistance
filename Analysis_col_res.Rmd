@@ -448,7 +448,7 @@ This function is useful to:
 ```{r}
 
 resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore.nul=F, lag_amu_init, obj="plot", expo="allab"){
-  obtab = data.frame(cycle=NA, amu_init=NA, amu_t=NA, auc=NA, age=NA, init=NA, prev=NA, end=NA)
+  obtab = data.frame(cycle=NA, amu_init=NA, amu_t=NA, obsres=NA, age=NA, init=NA, prev=NA, end=NA)
   for(cyc_i in 1:n_cyc){
     for(time_i in 2:3){
       
@@ -503,12 +503,12 @@ resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore
   }
   obtab$cycle = as.factor(obtab$cycle)
   
-  obtab$res = obtab$auc >= thresh_res
+  obtab$res = obtab$obsres >= thresh_res
 
   if(obj == "plot"){
-    p = ggplot(data=obtab, aes(x=amu_t, y=auc, col=init))
-    p = p + xlab("All antibiotics use metric") + ylab("Area under curve")
-    p = p + ggtitle(paste0("Pearson correlation: ", round(cor(obtab$amu_init + obtab$amu_t, obtab$auc, use="complete.obs"), 3), " (", nrow(na.omit(obtab)), " complete observations, including ", round(sum(obtab$auc >= thresh_res, na.rm=T)*100/nrow(na.omit(obtab))), "% above threshold)"))
+    p = ggplot(data=obtab, aes(x=amu_t, y=obsres, col=init))
+    p = p + xlab("Recent AMU") + ylab("Measure of resistance")
+    p = p + ggtitle(paste0("Pearson correlation between recent AMU and the measure of resistance: ", round(cor(obtab$amu_t, obtab$obsres, use="complete.obs"), 3)))
     p = p + geom_point()
     p = p + geom_hline(yintercept = thresh_res, linetype="dashed", col="grey")
     p = p + scale_color_gradient(low = "red", high = "blue")
@@ -525,7 +525,7 @@ Here, either we run an interactive Shiny app, or we plot a simple graph showing 
 
 ```{r, fig.width=7, fig.height=5}
 ui <- fluidPage({
-  titlePanel("Correlation between past use and AUC")
+  titlePanel("Correlation between past use and the measure of resistance")
   sidebarLayout(
     sidebarPanel(
       sliderInput("nwkseff",
@@ -539,7 +539,7 @@ ui <- fluidPage({
                   max=15,
                   value=3),
       sliderInput("thresh_res",
-                  "Threshold value for AUC:",
+                  "Threshold value for the measure of resistance:",
                   min=0,
                   max=1,
                   value=0.5),
@@ -592,8 +592,8 @@ The introduction of colistin resistant bacteria from outside the flock is not me
 
 We use an Expectation-Maximization (E-M) algorithm with 2 steps:
 
-* Expectation: given a set of parameters, determine the most likely status for introduction (yes/no) for each observation
-* Maximization: given an assumed introduction status, determine the set of parameters maximizing the likelihood of the model (and select a model ?)
+* Expectation: given a set of parameters, determine the most likely status for introduction (yes/no) for each observation.
+* Maximization: given an assumed introduction status, determine the set of parameters maximizing the likelihood of the model.
 
 The algorithm is initiated with a random set of parameters, and is terminated when a convergence of likelihood is reached.
 
@@ -606,16 +606,18 @@ where:
 * $t$ is the week the sample was collected
 * $R_{t_1}$ is the measure of resistance in the initial sample of the same flock
 * $R_{t_2}$ is the measure of resistance in the previous sample if the observation belongs to the 3rd round of sampling (autocorrelation)
-* $f(t)=1$ if an introduction occurred before the sampling (between $t-\xi$ and $t-1$), and $f(t)=0$ otherwise
+* $f(t)=1$ if an introduction occurred before the sampling (between $t-\xi$ and $t-1$, where $\xi$ is fixed at 4 weeks), and $f(t)=0$ otherwise
 * $\mu$ is the average resistance when all other variables are null.
 
 The AMU metric $AMU_t$ is the use that just precedes the sampling date, and is defined as:
 
 $$AMU_t=\sum_{i=1}^{t-1}(U(i).exp[-\frac{ln(1/\epsilon)}{\beta}.(t-i-1)])$$
 
-where $U(i)$ is the (quantitative or qualitative) antimicrobial use in the flock.
+where $U(i)$ is the (quantitative or qualitative) antimicrobial use in the flock on week i. For now, in the following, we consider only qualitative use (= 0 or 1).
 
-$AMU_{init}$ is the use that occurs at the begining of the cycle. It is uncertain if it has effect on the resistance during the whole production cycle. We test this hypothesis. It is defined as:
+As shown in the figure below, $AMU_t$ is parametrized as an exponential decay: after $\beta$ weeks, the effect is as low as $\epsilon$, that we fix at 5%.
+
+$AMU_{init}$ is the use that occurs at the begining of the cycle (first $\delta$ weeks). It is uncertain if it has effect on the resistance during the whole production cycle. We test this hypothesis. It is defined as:
 
 $$AMU_{init}=\sum_{i=1}^{\delta}U(i)$$
 
@@ -680,7 +682,9 @@ The full model described above is model 24. Models 1 to 23 are simplifications o
 
 ### Function returning the minus loglikelihood
 
-This function enters the raw (transformed) values of the model's parameters, and returns either the minus loglikelihood (`aim="est"`), or the predicted and observed values of resistance and AMU, the minus loglikelihood and the true (not transformed) values of parameters (`aim="pred"`).
+This function enters the raw (transformed) values of the model's parameters and the probability of introduction for each observation, and returns either the minus loglikelihood (`aim="est"`), or the predicted and observed values of resistance and AMU, the minus loglikelihood and the true (not transformed) values of parameters (`aim="pred"`).
+
+Observations for which the resistance measure (model outcome) is absent are deleted. However, if an observation has NA values for measure of resistance in previous samples (`obsdat$init` and `obsdat$prev`), the value is set at the mean of the other values.
 
 We also define `run2_intr` which is a wraper: its output is the function `run2` with the value of `intr` (input of `run2`) specified.
 
@@ -698,7 +702,7 @@ run2 = function(aim="est", intr=introd, distrib_res="normal", mu, lambda1, lambd
   Sd = 3 * sigmoid(Sd)
 
   obsdat = resamu(nwkseff=beta, quantuse=F, tempo_amu="exp_decay", thresh_res=0.4, ignore.nul=F, lag_amu_init=delta, obj="est")
-  obsdat = obsdat[! is.na(obsdat$auc),]
+  obsdat = obsdat[! is.na(obsdat$obsres),]
   obsdat$init[is.na(obsdat$init)] = mean(obsdat$init, na.rm=T) # 0
   obsdat$prev[is.na(obsdat$prev)] = mean(obsdat$prev, na.rm=T) # 0
   obsdat$introduc = intr
@@ -711,8 +715,8 @@ run2 = function(aim="est", intr=introd, distrib_res="normal", mu, lambda1, lambd
 
   if(aim == "est"){
     if(distrib_res == "normal"){
-      lik_intro = dnorm(x=obsdat$auc, mean=obsdat$predmod_intro, sd=Sd)
-      lik_nointro = dnorm(x=obsdat$auc, mean=obsdat$predmod_nointro, sd=Sd)
+      lik_intro = dnorm(x=obsdat$obsres, mean=obsdat$predmod_intro, sd=Sd)
+      lik_nointro = dnorm(x=obsdat$obsres, mean=obsdat$predmod_nointro, sd=Sd)
       
       total_loglik = log(obsdat$introduc * lik_intro + (1-obsdat$introduc) * lik_nointro)
       total_loglik[is.infinite(total_loglik)] = -710
@@ -723,7 +727,7 @@ run2 = function(aim="est", intr=introd, distrib_res="normal", mu, lambda1, lambd
       print("Residuals distribution not defined.")
     }
   }else if (aim == "pred"){
-    return(list(obsdat = obsdat[,c("auc", "amu_init", "amu_t", "introduc", "predmod")], minll = -sum(dnorm(x=obsdat$auc, mean=obsdat$predmod, sd=Sd, log=T)), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
+    return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod")], minll = -sum(dnorm(x=obsdat$obsres, mean=obsdat$predmod, sd=Sd, log=T)), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
   }
 }
 
@@ -752,7 +756,7 @@ fitplot = function(fitted_model, intro){
   print("True values of parameters:")
   print(true_fit_coef)
   
-  p = ggplot(obs_vs_pred[[1]], aes(x = auc, y = predmod, fill = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, col = introduc))
+  p = ggplot(obs_vs_pred[[1]], aes(x = obsres, y = predmod, fill = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, col = introduc))
   p = p + xlab("Observed resistance") + ylab("Predicted resistance")
   p = p + ggtitle(paste0("Observed VS Predicted resistance (minus LogLikelihood =", round(minll, 2), ")"))
   p = p + geom_abline(intercept = 0, slope = 1, linetype = "dashed")
@@ -764,11 +768,9 @@ fitplot = function(fitted_model, intro){
 }
 ```
 
-### Test of the estimation with simulated data
-
 ### Example of estimation of the full model for one given introduction status
 
-Here, we test the model's estimation (M-step), with one given introduction status for each observation. We use "bbmle" package for point estimates.
+Here, we test the full model's estimation (M-step on model 24), with one given introduction status for each observation. We use "bbmle" package for point estimates.
 
 ```{r, label="Test full model estimation", fig.width=6, fig.height=4}
 introd = c(rep(0, 4), 1, 0, 1, 1, 1, rep(0, 6), 1, 0, 1, rep(0, 3), 1, 0, 0, 1, rep(0, 7), 1, 0, 0, 1, 1, 1, 0, 1, rep(0, 5), 1, rep(0, 3))
@@ -816,7 +818,7 @@ rep_est = function(nrep, minusloglrep, methodrep, controlrep, fixedvar, startvar
 
 #### Function for the E step
 
-With one given set of parameters for the model, we determine what is the best "introduction" status (yes/no) for each observation.
+With one given set of parameters for the model, we determine what is the most likely probability for the occurrence of an introduction in the flock, for each observation.
 
 We first calculate the residuals $r_{intro}^i$ (`r_intro`) and $r_{nointro}^i$ (`r_nointro`) of observations $R_i$ (observed resistance) under the 2 models: $M_{intro}$ ("Only introductions") and $M_{nointro}$ ("No introduction").
 
@@ -828,11 +830,9 @@ And:
 
 $$p(R_i \in M_{nointro}) = 1-p(R_i \in M_{intro})$$
 
-As the residuals follow a normal distribution (with mean=0 and standard deviation $\sigma$ (`sigma`), fixed to 0.15):
+As the residuals follow a normal distribution (with mean=0 and standard deviation $\sigma$ (`sigma`), estimated in the M-step):
 
 $$p(R_i \in M_{intro}) = \frac{exp(\frac{-(r_{intro}^i)^2}{2.\sigma^2})}{exp(\frac{-(r_{intro}^i)^2}{2.\sigma^2}) + exp(\frac{-(r_{nointro}^i)^2}{2.\sigma^2})}$$
-
-Then the introduction status (1/0) of each observation is assigned by drawing in a Bernoulli of parameter $p(R_i \in M_{intro})$.
 
 (Sources: http://www.cs.huji.ac.il/~yweiss/emTutorial.pdf ; http://www.di.fc.ul.pt/~jpn/r/EM/EM.html#eg-em-with-mix-of-two-linear-models)
 
@@ -867,7 +867,7 @@ E_step <- function(observed, params) {
 
 #### Function for the M step
 
-Given an introduction status for each observation, we fit the model. Depending on the model, some parameters can be fixed in the `mle2` function. Several repetitions of the fit are computed, with function `rep_est`.
+Given a probability of introduction for each observation, we fit the model. Depending on the model, some parameters can be fixed in the `mle2` function. Several repetitions of the fit are computed, with function `rep_est`.
 
 ```{r}
 M_step <- function(introd, modnum) {
@@ -933,7 +933,7 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=1, max.step=100) {
     
     raw_params = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1)), Sd = logit(runif(1)), p_intro = runif(1))
     
-    obs_res = resamu(obj="est", nwkseff=1, thresh_res=0.5, lag_amu_init=1)$auc
+    obs_res = resamu(obj="est", nwkseff=1, thresh_res=0.5, lag_amu_init=1)$obsres
     obs_res = obs_res[! is.na(obs_res)]
 
     counting_for_convergence = 0
@@ -971,22 +971,81 @@ repetalgo[[which.min(repetalgo_minloglik)]]
 }
 ```
 
-### Test of the full E-M algorithm on one model
+### Test of the E-M algorithm on simulated data
 
-We launch the algorithm for one of the models:
+From the real AMU data, we want to create fake data of resistance showing a clear relationship between use and resistance. We also want to add fake introductions above this. This is to test the ability of the algorithm to detect an effect of the recent AMU on resistance, along with introductions.
 
-```{r, label="E-M algorithm on one model", fig.width=6, fig.height=4}
-# results = EM_algo(modnum=19, numb_rep_algo=1)
-# fitplot(fitted_model = results[[1]], intro = results[[3]])
-# print(paste0("Probability of introduction: ", results[[2]][["p_intro"]]))
-# 
-# rm(results)
+First, we save the true resistance data:
 
+```{r}
+res_data_saved = res_data
+```
+
+We create fake resistance data such that the relationship with AMU is linear, with $\beta_{fake} = 8$ (`beta_fake`) and $\alpha_{fake} = 0.4$ (`alpha_fake`). Note that we add some noise.
+
+```{r, fig.width=7, fig.height=5}
+beta_fake = 8
+alpha_fake = 0.4
+
+fake_res = run2(aim="pred", intr=0, mu=logit(0.05), lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]$predmod
+fake_res = fake_res + rnorm(length(fake_res), 0, 0.05)
+
+res_data = as.data.frame(cbind(res_data$S, matrix(c(fake_res[1:40], NA, fake_res[41:49]), nrow=length(res_data$S), ncol=2, byrow=T)))
+
+resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1)
+```
+
+Now we add some introductions in observations with low AMU, to simulate the fact observations with low AMU have sometimes a high resistance:
+
+```{r, fig.width=7, fig.height=5}
+introd_fake = sample(x = which(fake_res < 0.2), size = round(0.5 * length(which(fake_res < 0.2))))
+fake_res[introd_fake] = fake_res[introd_fake] + rnorm(length(introd_fake), 0.5, 0.05)
+
+res_data = res_data_saved
+res_data = as.data.frame(cbind(res_data$S, matrix(c(fake_res[1:40], NA, fake_res[41:49]), nrow=length(res_data$S), ncol=2, byrow=T)))
+
+resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1)
+```
+
+Therefore, we are in a situation where the fake resistance data was simulated by model 19 (introductions + recent AMU). We want to test now if the algorithm can detect the relationship between AMU and fake resistance data. We also want to know if model 19 is selected against model 13 (introductions only).
+
+We apply the algorithm on model 13:
+
+```{r, label="E-M algorithm on fake resistance data (model 13)", fig.width=6, fig.height=4}
+results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
+fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
+```
+
+And we apply the algorithm on model 19:
+
+```{r, label="E-M algorithm on fake resistance data (model 19)", fig.width=6, fig.height=4}
+results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
+fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+```
+
+The fit seems good. Let us compare both models' AIC:
+
+```{r}
+print("AIC of model 13:")
+AIC(results_mod13[[1]]) + results_mod13[["number_obs"]]
+
+print("AIC of model 19:")
+AIC(results_mod19[[1]]) + results_mod19[["number_obs"]]
+```
+
+The algorithm detects the relationship between use and fake resistance, and model 19 has a lower AIC than model 13.
+
+We delete the fake resistance data and come back to the true data:
+
+```{r}
+res_data = res_data_saved
+
+rm(res_data_saved, results_mod13, results_mod19, beta_fake, alpha_fake, fake_res, introd_fake)
 ```
 
 ## Results
 
-If the computation was already done, `alread_comp = T`.
+If the computation was already performed, `alread_comp = T`.
 
 ```{r}
 alread_comp = T
@@ -994,7 +1053,7 @@ alread_comp = T
 
 ### Estimation of models 1 to 12 without introduction
 
-First, we fit models that do not take into account the introductions, so we do not need to implement the E-M algorithm. Because the package `bbmle` does not always find the likelihood maximum, we repeat the estimation 10 times with `rep_est`, and take the maximum likelihood among these repetitions. The list `lfit` contains all fitted models.
+First, we fit models that do not take into account the introductions. For them, we do not need to implement the E-M algorithm. Because the package `bbmle` does not always find the likelihood maximum, we repeat the estimation 10 times with `rep_est`, and take the maximum likelihood among these repetitions. The list `lfit` contains all fitted models.
 
 ```{r, label="Estimation of the models without introduction"}
 
@@ -1035,7 +1094,7 @@ rm(introd)
 
 ### Parallel computation of the E-M algorithm for models 13 to 24
 
-We repeat the algorithm 5 times (with different seeds) per model, and each maximization step (model fit) is repeated 5 times (with different seeds too) to make sure the likelihood maximum is reached. These values were also chosen in order to obtain a reasonable computation time on our machine.
+We repeat the algorithm 5 times (with different seeds) per model, and each maximization step (model fit) is repeated 5 times (with different seeds too) to make sure the likelihood maximum is reached.
 
 ```{r, label="E-M algorithm on all models"}
 
@@ -1090,7 +1149,10 @@ Models 13 and 19 have the highest AIC weights (= lowest AIC). We plot their fit 
 
 ```{r, fig.width=6, fig.height=4}
 fitplot(fitted_model = resulpar[[1]][[1]], intro = resulpar[[1]][[3]])
+print(paste0("Probability of introduction in model 13: ", resulpar[[1]][[2]][["p_intro"]]))
+
 fitplot(fitted_model = resulpar[[7]][[1]], intro = resulpar[[7]][[3]])
+print(paste0("Probability of introduction in model 19: ", resulpar[[7]][[2]][["p_intro"]]))
 
 ```
 
@@ -1101,11 +1163,13 @@ bbmle::anova(lfit[[13]], lfit[[19]])
 
 ```
 
-In conclusion, model 19 (introductions + recent AMU) seem to explain best the data, followed closely by model 13 (introductions only). With the LRT, it is not significant to add variables to complexify model 13.
+In conclusion, model 19 (introductions + recent AMU) seems to explain best the data, followed closely by model 13 (introductions only). With the LRT, it is not significant to add variables to complexify model 13.
 
-### Analysis alternative
+The most important factor explaining the level of colistin resistance measured in the farms is therefore the introductions. The AMU (all antibiotics) in the 3.3 (value of Beta) weeks preceding the sampling seems to play a role too, even though the p-value of the LRT is only 0.12 (not significant). On the contrary, the AMU at the beginning of the production cycle does not appear to play an important role, nor the resistance in the previous samples in the same flock (autocorrelation).
 
-A way to perform the analysis could also be to:
+### Alternative analysis
+
+An other way to perform the analysis could be to:
 
 1) Compare models without introduction (models 1 to 12)
 2) Among the best of them (highest AIC weight), compute the E-M algorithm to check if adding introductions improves the fit
