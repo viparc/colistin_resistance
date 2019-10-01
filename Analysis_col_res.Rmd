@@ -599,32 +599,32 @@ The algorithm is initiated with a random set of parameters, and is terminated wh
 
 For all observations in the 2nd or 3rd round of samplings, we define a model used in the Maximization step. Several models are tested, all being simplified versions of this full model:
 
-$$R_t = \sum_{k \in \{ t_1 ; t_2 \} }(\lambda_k.R_k) + \eta.f(t) + \alpha.AMU_t + \theta.AMU_{init} + \mu$$
+$$R_i(t) = \sum_{k \in \{ t_1 ; t_2 \} }(\lambda_k.R_i(k)) + \eta.f_i(t) + \alpha.A_{recent,i}(t) + \theta.A_{init,i}(t) + \mu$$
 where:
 
-* $R$ is the measure of sample's resistance
+* $R_i(t)$ is the measure of resistance in observation (sample) i
 * $t$ is the week the sample was collected
-* $R_{t_1}$ is the measure of resistance in the initial sample of the same flock
-* $R_{t_2}$ is the measure of resistance in the previous sample if the observation belongs to the 3rd round of sampling (autocorrelation)
-* $f(t)=1$ if an introduction occurred before the sampling (between $t-\xi$ and $t-1$, where $\xi$ is fixed at 4 weeks), and $f(t)=0$ otherwise
+* $R_i(t_1)$ is the measure of resistance in the initial sample of the same flock
+* $R_i(t_2)$ is the measure of resistance in the previous sample if the observation belongs to the 3rd round of sampling (autocorrelation)
+* $f_i(t)=1$ if an introduction occurred before the sampling (between $t-\xi$ and $t-1$, where $\xi$ is fixed at 4 weeks), and $f(t)=0$ otherwise
 * $\mu$ is the average resistance when all other variables are null.
 
-The AMU metric $AMU_t$ is the use that just precedes the sampling date, and is defined as:
+The AMU metric $A_{recent,i}(t)$ is the use that just precedes the sampling date, and is defined as:
 
-$$AMU_t=\sum_{i=1}^{t-1}(U(i).exp[-\frac{ln(1/\epsilon)}{\beta}.(t-i-1)])$$
+$$A_{recent,i}(t)=\sum_{j=1}^{t-1}(U(j).exp[-\frac{ln(1/\epsilon)}{\beta}.(t-j-1)])$$
 
-where $U(i)$ is the (quantitative or qualitative) antimicrobial use in the flock on week i. For now, in the following, we consider only qualitative use (= 0 or 1).
+where $U(j)$ is the (quantitative or qualitative) antimicrobial use in the flock on week j. For now, in the following, we consider only qualitative use (= 0 or 1).
 
-As shown in the figure below, $AMU_t$ is parametrized as an exponential decay: after $\beta$ weeks, the effect is as low as $\epsilon$, that we fix at 5%.
+As shown in the figure below, $A_{recent,i}(t)$ is parametrized as an exponential decay: after $\beta$ weeks, the effect is as low as $\epsilon$, that we fix at 5%.
 
-$AMU_{init}$ is the use that occurs at the begining of the cycle (first $\delta$ weeks). It is uncertain if it has effect on the resistance during the whole production cycle. We test this hypothesis. It is defined as:
+$A_{init,i}(t)$ is the use that occurs at the begining of the cycle (first $\delta$ weeks). It is uncertain if it has effect on the resistance during the whole production cycle. We test this hypothesis. It is defined as:
 
-$$AMU_{init}=\sum_{i=1}^{\delta}U(i)$$
+$$A_{init,i}(t)=\sum_{j=1}^{\delta}U(j)$$
 
 ```{r echo=FALSE, fig.width=7, fig.height=5}
 metramu = data.frame(x = seq(0,10,0.01), exp = 0.95*exp(-log(20)/(10-6))^seq(10,0,-0.01), step = c(rep(0.3, 451), rep(0, 550)))
 p = ggplot(data=metramu, aes(x=x))
-p = p + ggtitle("Metric for the past use of antibiotics (AMU(t) and AMU(init))")
+p = p + ggtitle("Metric for the past use of antibiotics (A(init,i)(t) and A(recent,i)(t))")
 p = p + xlab("Weeks i") + theme(axis.title.y=element_blank())
 p = p + geom_ribbon(aes(ymin=0, ymax=pmax(exp, step)), alpha=0.3)
 p = p + geom_line(aes(y=exp, col="1"), size=1)
@@ -1012,25 +1012,28 @@ Therefore, we are in a situation where the fake resistance data was simulated by
 We apply the algorithm on model 13:
 
 ```{r, label="E-M algorithm on fake resistance data (model 13)", fig.width=6, fig.height=4}
-results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
-fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
+# results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
+# fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
+
 ```
 
 And we apply the algorithm on model 19:
 
 ```{r, label="E-M algorithm on fake resistance data (model 19)", fig.width=6, fig.height=4}
-results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
-fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+# results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
+# fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+
 ```
 
 The fit seems good. Let us compare both models' AIC:
 
 ```{r}
-print("AIC of model 13:")
-AIC(results_mod13[[1]]) + results_mod13[["number_obs"]]
+# print("AIC of model 13:")
+# AIC(results_mod13[[1]]) + results_mod13[["number_obs"]]
+# 
+# print("AIC of model 19:")
+# AIC(results_mod19[[1]]) + results_mod19[["number_obs"]]
 
-print("AIC of model 19:")
-AIC(results_mod19[[1]]) + results_mod19[["number_obs"]]
 ```
 
 The algorithm detects the relationship between use and fake resistance, and model 19 has a lower AIC than model 13.
@@ -1128,15 +1131,16 @@ l_loglik = unlist(lapply(X = lfit, FUN = logLik))
 l_aic = unlist(lapply(X = lfit, FUN = AIC))
 l_aic[13:24] = l_aic[13:24] + resulpar[[1]][["number_obs"]]
 
-l_aic = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
+l_aic_weights = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
 
-plot_aic_ll = data.frame(mod = as.factor(1:24), AIC_weights = l_aic, MinusLogLikelihood = -l_loglik)
+plot_aic_ll = data.frame(mod = as.factor(1:24), LogLikelihood = l_loglik, MinAIC = -l_aic, AIC_weights = l_aic_weights)
 plot_aic_ll = melt(plot_aic_ll, id = "mod")
 
 p = ggplot(data = plot_aic_ll, aes(y = mod))
 p = p + ggtitle("Comparison of the fitted models") + xlab("Indicator value") + ylab("Models")
-p = p + geom_vline(data = subset(plot_aic_ll, variable == "AIC_weights"), aes(xintercept = min(plot_aic_ll$value[plot_aic_ll$variable == "AIC_weights"])), linetype = "dashed")
-p = p + geom_vline(data = subset(plot_aic_ll, variable == "MinusLogLikelihood"), aes(xintercept = min(plot_aic_ll$value[plot_aic_ll$variable == "MinusLogLikelihood"])), linetype = "dashed")
+p = p + geom_vline(data = subset(plot_aic_ll, variable == "LogLikelihood"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "LogLikelihood"])), linetype = "dashed")
+p = p + geom_vline(data = subset(plot_aic_ll, variable == "MinAIC"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "MinAIC"])), linetype = "dashed")
+p = p + geom_vline(data = subset(plot_aic_ll, variable == "AIC_weights"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "AIC_weights"])), linetype = "dashed")
 p = p + geom_point(aes(x = value), shape=18, size=2)
 p = p + facet_wrap(~variable, scales = "free_x")
 p = ggplotly(p)
