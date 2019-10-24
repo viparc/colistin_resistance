@@ -742,7 +742,7 @@ run2 = function(aim="est", intr=introd, distrib_res="normal", mu, lambda1, lambd
       print("Residuals distribution not defined.")
     }
   }else if (aim == "pred"){
-    return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod")], minll = -sum(dnorm(x=obsdat$obsres, mean=obsdat$predmod, sd=Sd, log=T)), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
+    return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod", "cycle")], minll = -sum(dnorm(x=obsdat$obsres, mean=obsdat$predmod, sd=Sd, log=T)), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
   }
 }
 
@@ -927,8 +927,9 @@ M_step <- function(introd, modnum) {
   raw_coef = c(raw_coef, p_intro = prop_intro)
   llmod = ob_pred[[2]]
   true_coef = ob_pred[[3]]
+  number_cycle = ob_pred[[1]]$cycle
   
-  list(raw_coef, llmod, modstep, true_coef)
+  list(raw_coef, llmod, modstep, true_coef, number_cycle)
 }
 ```
 
@@ -972,6 +973,7 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=1, max.step=100) {
       print(paste0("Minus Log Likelihood: ", minloglik))
       modstep = output_mstep[[3]]
       param_true_format = output_mstep[[4]]
+      cycle_id = output_mstep[[5]]
   
       if (abs(minloglik - old.minloglik) < tol){
         counting_for_convergence = counting_for_convergence +1
@@ -982,7 +984,7 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=1, max.step=100) {
     write.table(c(), file=paste0("C:/Users/Jonathan/Desktop/Model ", modnum, " completed.txt"))
     print(paste0("Final step: ", step)); cat("\n")
     
-    repetalgo[[algorep_ite]] = list(modstep, raw_params, introductions, minloglik, param_true_format, number_obs=length(obs_res))
+    repetalgo[[algorep_ite]] = list(modstep, raw_params, introductions, minloglik, param_true_format, number_obs=length(obs_res), cycle_id)
     repetalgo_minloglik[algorep_ite] = minloglik
   }
   
@@ -1127,14 +1129,14 @@ if(alread_comp){
 
   cl<-makeCluster(5)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("definition_amu","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resulpar_13to21 = parLapply(cl, X=13:21, fun=EM_algo, numb_rep_algo=5)
   stopCluster(cl)
   save(resulpar_13to21, file = "C:/Users/Jonathan/Desktop/resulpar_13to21.rdata")
   
   cl<-makeCluster(3)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("definition_amu","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resulpar_22to24 = parLapply(cl, X=22:24, fun=EM_algo, numb_rep_algo=5)
   stopCluster(cl)
   save(resulpar_22to24, file = "C:/Users/Jonathan/Desktop/resulpar_22to24.rdata")
@@ -1238,3 +1240,82 @@ rm(l_aic)
 ```
 
 In this case, model 19 (AIC weight = 73%) is the final model chosen.
+
+### Correlation between the probability of introduction and the geographical location
+
+Now we computed the probability of introduction for each sample (2 per farm). We want to check if the probability of introduction is spatially autocorrelated.
+
+We load the GPS data (`gps_farms`):
+
+```{r}
+gps_farms = as.data.frame(read_excel(path="C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/GPS-300818.xlsx", sheet="Cycle")[,c(12,13,14)])
+colnames(gps_farms) = c("Farm", "Lat", "Long")
+gps_farms$Farm = substr(gps_farms$Farm, 4, 6)
+```
+
+We gather in a same data frame the farm IDs and introduction probabilities (`prob_intro_farms`):
+
+```{r}
+prob_intro_farms = data.frame(Farm = resulpar[[1]][[7]], Prob = resulpar[[1]][[3]])
+prob_intro_farms$Farm = rownames(weeks_samp)[prob_intro_farms$Farm]
+prob_intro_farms$Farm = substr(prob_intro_farms$Farm, 1, 3)
+```
+
+We add GPS information to `prob_intro_farms`:
+
+```{r}
+prob_intro_farms = merge(x = prob_intro_farms, y = gps_farms, by = "Farm", all.x = T)
+
+p = ggplot(data = prob_intro_farms, aes(x = Long, y = Lat, col = Prob))
+p = p + ggtitle("Location of the farms and their probability of introduction")
+p = p + xlab("Longitude") + ylab("Latitude")
+p = p + geom_jitter(width = 0.003, height = 0.003)
+p
+
+```
+
+We compute the Moran's I statistic, defined as ():
+
+$$I = \frac{N_{samp}\sum_{i,j}W_{i,j}(p_i-\bar{p})(p_j-\bar{p})}{\sum_{i,j}W_{i,j}\sum_{i}(p_i-\bar{p})^2}$$
+
+where $p_i$ is the probability of introduction computed for sample $i$, $\bar{p}$ is the mean of probabilities, and $N_{samp}$ the number of samples. $W$ is the weight matrix: the closer are samples $i$ and $j$, the higher is $W_{i,j}$. We define it as follows:
+
+$$W_{i,j} = e^{-k.D(i,j)}$$
+where $k$ is a tuned parameter, and $D(i,j)$ is the geographical distance between farms where samples $i$ and $j$ were sampled. Therefore, $W_{i,j} \le 1$ and the higher k, the smaller the distance $D(i,j)$ for which $W_{i,j}$ is not negligible ($W_{i,j} > 0.05$ for instance).
+
+Here, we compute the Moran's I for a range of values for $k$. Each time, we use package `ape` to test whether the probability of introduction $p$ is spatially autocorrelated: it is significantly the case when the p-value is lower than 0.05 (red line). We plot the values of the p-value depending on the values of $k$.
+
+We also plot the maximum distance $D(i,j)$ for which $W_{i,j} > 0.05$ (i.e. the maximum distance not negligible in the calculation of the statistic).
+
+```{r}
+library(ape)
+
+coef_moran = function(k, decay_fun){
+  dist_geo = as.matrix(dist(x = prob_intro_farms[,c("Lat", "Long")]))
+  
+  if(decay_fun == "exp"){
+    weight_matrix = exp(-k * dist_geo)
+  }else if(decay_fun == "thresh"){
+    weight_matrix = (dist_geo <= k)
+  }
+  diag(weight_matrix) = 0
+  
+  res = Moran.I(x = prob_intro_farms$Prob, weight = weight_matrix)
+  
+  list(p_val = res$p.value, max_dist = max(dist_geo[weight_matrix > 0.05]))
+}
+
+val_thresh = seq(0,0.23,0.001)
+val_exp = 1:1000
+
+plot(x = val_exp, y = sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",], type="l", main = "p-value (there is spatial correlation if p<0.05)", xlab = "k", ylab = "p-value") + lines(x = c(0, 100000), y = c(0.05, 0.05), col = "red")
+
+plot(x = val_exp, y = sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["max_dist",], type="l", main = "Maximum distance such as W(i,j) > 0.05", xlab = "k", ylab = "Distance (°)")
+
+print("The values of k for which there is spatial autocorrelation (p-value < 0.05) are:")
+print(val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05])
+
+```
+
+
+
