@@ -658,7 +658,7 @@ rm(metramu, p)
 If `definition_amu = "col"`, the use is defined as the qualitative colistin use. If `definition_amu = "allab"`, the use is defined as the qualitative use of any antibiotic.
 
 ```{r}
-definition_amu = "col"
+definition_amu = "allab"
 ```
 
 ## Variations of the model
@@ -940,7 +940,7 @@ We repeat the algorithm several times to make sure the whole space has been expl
 Convergence is defined as: the distance between the likelihood and the former likelihood is less than 1, 3 times in a row.
 
 ```{r}
-EM_algo <- function(modnum, numb_rep_algo=5, tol=1, max.step=100) {
+EM_algo <- function(modnum, numb_rep_algo=3, tol=1, max.step=50) {
 
   repetalgo = list()
   repetalgo_minloglik = c()
@@ -981,14 +981,17 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=1, max.step=100) {
         counting_for_convergence = 0
       }
     }
-    write.table(c(), file=paste0("C:/Users/Jonathan/Desktop/Model ", modnum, " completed.txt"))
     print(paste0("Final step: ", step)); cat("\n")
+    
+    if(step == max.step+1){write.table(c(), file=paste0("C:/Users/Jonathan/Desktop/Model ", modnum, ", iteration ", algorep_ite, " ouf of ", numb_rep_algo, " - no convergence of the likelihood"))}
     
     repetalgo[[algorep_ite]] = list(modstep, raw_params, introductions, minloglik, param_true_format, number_obs=length(obs_res), cycle_id)
     repetalgo_minloglik[algorep_ite] = minloglik
   }
   
-repetalgo[[which.min(repetalgo_minloglik)]]
+  save(repetalgo, file = paste0("C:/Users/Jonathan/Desktop/resul_", definition_amu, "_mod_", modnum, ".rdata"))
+
+  repetalgo[[which.min(repetalgo_minloglik)]]
 }
 ```
 
@@ -1082,34 +1085,34 @@ First, we fit models that do not take into account the introductions. For them, 
 ```{r, label="Estimation of the models without introduction"}
 
 if(alread_comp){
-  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp/lfit.rdata"))
+  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp/lfit_", definition_amu,".rdata"))
 }else{
   introd = 0
   lfit = list()
   
-  lfit[[1]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
+  lfit[[1]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
   
-  lfit[[2]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1", "Sd"))
+  lfit[[2]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1", "Sd"))
   
-  lfit[[3]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2", "Sd"))
+  lfit[[3]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2", "Sd"))
   
-  lfit[[4]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta"), startvar = c("mu", "teta", "delta", "Sd"))
+  lfit[[4]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta"), startvar = c("mu", "teta", "delta", "Sd"))
   
-  lfit[[5]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "teta",  "delta", "Sd"))
+  lfit[[5]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "teta",  "delta", "Sd"))
   
-  lfit[[6]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta", "Sd"))
+  lfit[[6]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta", "Sd"))
   
-  lfit[[7]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
+  lfit[[7]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
   
-  lfit[[8]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta", "Sd"))
+  lfit[[8]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta", "Sd"))
   
-  lfit[[9]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta", "Sd"))
+  lfit[[9]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta", "Sd"))
   
-  lfit[[10]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2", "eta"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta", "Sd"))
+  lfit[[10]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2", "eta"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta", "Sd"))
   
-  lfit[[11]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta", "Sd"))
+  lfit[[11]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta", "Sd"))
   
-  lfit[[12]] = rep_est(nrep=10, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta", "Sd"))
+  lfit[[12]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta", "Sd"))
   
   rm(introd)
 }
@@ -1123,31 +1126,31 @@ We repeat the algorithm 5 times (with different seeds) per model, and each maxim
 ```{r, label="E-M algorithm on all models"}
 
 if(alread_comp){
-  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp/resulpar.rdata"))
+  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp/resulpar_", definition_amu, "_all.rdata"))
 }else{
   t = as.numeric(Sys.time())
 
-  cl<-makeCluster(5)
+  cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
   clusterExport(cl, c("definition_amu","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resulpar_13to21 = parLapply(cl, X=13:21, fun=EM_algo, numb_rep_algo=5)
+  resulpar_13to21 = parLapply(cl, X=13:21, fun=EM_algo, numb_rep_algo=3)
   stopCluster(cl)
-  save(resulpar_13to21, file = "C:/Users/Jonathan/Desktop/resulpar_13to21.rdata")
+  save(resulpar_13to21, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_13to21.rdata"))
   
   cl<-makeCluster(3)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
   clusterExport(cl, c("definition_amu","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resulpar_22to24 = parLapply(cl, X=22:24, fun=EM_algo, numb_rep_algo=5)
+  resulpar_22to24 = parLapply(cl, X=22:24, fun=EM_algo, numb_rep_algo=3)
   stopCluster(cl)
-  save(resulpar_22to24, file = "C:/Users/Jonathan/Desktop/resulpar_22to24.rdata")
+  save(resulpar_22to24, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_22to24.rdata"))
   
   resulpar = c(resulpar_13to21, resulpar_22to24)
-  save(resulpar, file = "C:/Users/Jonathan/Desktop/resulpar.rdata")
+  save(resulpar, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_all.rdata"))
 
   as.numeric(Sys.time()) - t
   
   for(m in 1:12){lfit[[m+12]] = resulpar[[m]][[1]]}
-  save(lfit, file = "C:/Users/Jonathan/Desktop/lfit.rdata")
+  save(lfit, file = paste0("C:/Users/Jonathan/Desktop/lfit_", definition_amu, ".rdata"))
   rm(m, cl)
 }
 
@@ -1256,7 +1259,7 @@ gps_farms$Farm = substr(gps_farms$Farm, 4, 6)
 We gather in a same data frame the farm IDs and introduction probabilities (`prob_intro_farms`):
 
 ```{r}
-prob_intro_farms = data.frame(Farm = resulpar[[1]][[7]], Prob = resulpar[[1]][[3]])
+prob_intro_farms = data.frame(Farm = resulpar[[7]][[7]], Prob = resulpar[[7]][[3]])
 prob_intro_farms$Farm = rownames(weeks_samp)[prob_intro_farms$Farm]
 prob_intro_farms$Farm = substr(prob_intro_farms$Farm, 1, 3)
 ```
@@ -1274,7 +1277,7 @@ p
 
 ```
 
-We compute the Moran's I statistic, defined as ():
+We compute the Moran's I statistic, defined as:
 
 $$I = \frac{N_{samp}\sum_{i,j}W_{i,j}(p_i-\bar{p})(p_j-\bar{p})}{\sum_{i,j}W_{i,j}\sum_{i}(p_i-\bar{p})^2}$$
 
