@@ -457,7 +457,7 @@ This function is useful to:
 
 ```{r}
 
-resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore.nul=F, lag_amu_init, obj="plot", expo="allab"){
+resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore.nul=F, lag_amu_init, obj="plot", expo){
   obtab = data.frame(cycle=NA, amu_init=NA, amu_t=NA, obsres=NA, age=NA, init=NA, prev=NA, end=NA)
   for(cyc_i in 1:n_cyc){
     for(time_i in 2:3){
@@ -589,7 +589,7 @@ run_shiny = F
 if(run_shiny){
   shinyApp(ui=ui, server=server)
 }else{
-  resamu(nwkseff = 3, quantuse = F, tempo_amu="exp_decay", thresh_res = 0.5, lag_amu_init = 1, obj="plot", expo="allab")
+  resamu(nwkseff = 1.00001, quantuse = F, tempo_amu="exp_decay", thresh_res = 0.5, lag_amu_init = 1, obj="plot", expo="col")
 }
 rm(ui, server, run_shiny)
 ```
@@ -621,11 +621,11 @@ where:
 
 The AMU metric $A_{recent,i}(t)$ is the use that just precedes the sampling date, and is defined as:
 
-$$A_{recent,i}(t)=\sum_{j=1}^{t-1}(U(j).exp[-\frac{ln(1/\epsilon)}{\beta}.(t-j-1)])$$
+$$A_{recent,i}(t)=\sum_{j=1}^{t-1}(U(j).exp[\frac{ln(\epsilon)}{\beta}.(t-j-1)])$$
 
 where $U(j)$ is the (quantitative or qualitative) antimicrobial use in the flock on week j. For now, in the following, we consider only qualitative use (= 0 or 1).
 
-As shown in the figure below, $A_{recent,i}(t)$ is parametrized as an exponential decay: after $\beta$ weeks, the effect is as low as $\epsilon$, that we fix at 5%.
+As shown in the figure below, $A_{recent,i}(t)$ is parametrized as an exponential decay: after β+1 weeks, the effect of AMU is $\epsilon$ (<< 1) times its effect after one week. We fix $\epsilon$ at 1%.
 
 $A_{init,i}(t)$ is the use that occurs at the begining of the cycle (first $\delta$ weeks). It is uncertain if it has effect on the resistance during the whole production cycle. We test this hypothesis. It is defined as:
 
@@ -953,7 +953,7 @@ EM_algo <- function(modnum, numb_rep_algo=3, tol=1, max.step=50) {
     
     raw_params = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1)), Sd = logit(runif(1)), p_intro = runif(1))
     
-    obs_res = resamu(obj="est", nwkseff=1, thresh_res=0.5, lag_amu_init=1)$obsres
+    obs_res = resamu(obj="est", nwkseff=1, thresh_res=0.5, lag_amu_init=1, expo=definition_amu)$obsres
     obs_res = obs_res[! is.na(obs_res)]
 
     counting_for_convergence = 0
@@ -1016,7 +1016,7 @@ fake_res = fake_res + rnorm(length(fake_res), 0, 0.05)
 
 res_data = as.data.frame(cbind(res_data$S, matrix(c(fake_res[1:40], NA, fake_res[41:49]), nrow=length(res_data$S), ncol=2, byrow=T)))
 
-resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1)
+resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo=definition_amu)
 ```
 
 Now we add some introductions in observations with low AMU, to simulate the fact observations with low AMU have sometimes a high resistance:
@@ -1028,7 +1028,7 @@ fake_res[introd_fake] = fake_res[introd_fake] + rnorm(length(introd_fake), 0.5, 
 res_data = res_data_saved
 res_data = as.data.frame(cbind(res_data$S, matrix(c(fake_res[1:40], NA, fake_res[41:49]), nrow=length(res_data$S), ncol=2, byrow=T)))
 
-resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1)
+resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo=definition_amu)
 ```
 
 Therefore, we are in a situation where the fake resistance data was simulated by model 19 (introductions + recent AMU). We want to test now if the algorithm can detect the relationship between AMU and fake resistance data. We also want to know if model 19 is selected against model 13 (introductions only).
@@ -1173,8 +1173,8 @@ l_aic[13:24] = l_aic[13:24] + resulpar[[1]][["number_obs"]]
 
 l_aic_weights = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
 
-plot_aic_ll = data.frame(mod = as.factor(1:24), LogLikelihood = l_loglik, MinAIC = -l_aic, AIC_weights = l_aic_weights)
-plot_aic_ll = melt(plot_aic_ll, id = "mod")
+tab_aic_ll = data.frame(mod = as.factor(1:24), LogLikelihood = l_loglik, MinAIC = -l_aic, AIC_weights = l_aic_weights)
+plot_aic_ll = melt(tab_aic_ll, id = "mod")
 
 p = ggplot(data = plot_aic_ll, aes(y = mod))
 p = p + ggtitle("Comparison of the fitted models") + xlab("Indicator value") + ylab("Models")
@@ -1189,64 +1189,73 @@ p
 rm(p, plot_aic_ll, l_loglik, l_aic)
 ```
 
-Models 13 and 19 have the highest AIC weights (= lowest AIC). We plot their fit (observed VS predicted):
+Model 19 has the highest AIC weights (= lowest AIC). We plot its fit (observed VS predicted):
 
 ```{r, fig.width=6, fig.height=4}
-fitplot(fitted_model = resulpar[[1]][[1]], intro = resulpar[[1]][[3]])
-print(paste0("Probability of introduction in model 13: ", resulpar[[1]][[2]][["p_intro"]]))
 
 fitplot(fitted_model = resulpar[[7]][[1]], intro = resulpar[[7]][[3]])
 print(paste0("Probability of introduction in model 19: ", resulpar[[7]][[2]][["p_intro"]]))
 
 ```
 
-We can perform a Likelihood Ratio Test between models 13 and 19:
+To compare the contributions of variables, we apply this methodology:
 
+For instance, to compare the contributions of variables V1, V2 and V3, we start by comparing the null model (model 1) to the model with V1 only (resp. V2 only and V3 only). Between V1, V2 and V3, the most contributing variable is the one for which the AIC weights ratio with model 1 is the highest, e.g. V3. We also perform a likelihood ratio test between the null model and, in this case, the model with V3 only. Then, we compare the model with V3 only with the model including V3 and V2 (resp. V3 and V1). Between V1 and V2, the second most contributing variable is the one that maximize the AIC weights ratio. Similarly, a likelihood ratio test is performed to test the gain of adding this second variable. At each step, the AIC weights ratio has to be higher than 1, to demonstrate a higher probability of being the best model.
+
+Therefore, we first compare these ratios: [AIC weights of models 2, 4, 7 and 13] /  [AIC weights of model 1]:
+
+```{r}
+print(tab_aic_ll$AIC_weights[2] /tab_aic_ll$AIC_weights[1])
+print(tab_aic_ll$AIC_weights[4] /tab_aic_ll$AIC_weights[1])
+print(tab_aic_ll$AIC_weights[7] /tab_aic_ll$AIC_weights[1])
+print(tab_aic_ll$AIC_weights[13] /tab_aic_ll$AIC_weights[1])
+
+```
+
+The first contributing factor seems to be the introductions.
+
+```{r}
+bbmle::anova(lfit[[1]], lfit[[13]])
+
+```
+
+The likelihood ratio test is significant.
+
+Next step is compare these ratios: [AIC weights of models 14, 16 and 19] /  [AIC weights of model 13]:
+
+```{r}
+print(tab_aic_ll$AIC_weights[14] /tab_aic_ll$AIC_weights[13])
+print(tab_aic_ll$AIC_weights[16] /tab_aic_ll$AIC_weights[13])
+print(tab_aic_ll$AIC_weights[19] /tab_aic_ll$AIC_weights[13])
+
+```
+ The second most contributing variable seems to be the recent AMU.
+ 
 ```{r}
 bbmle::anova(lfit[[13]], lfit[[19]])
 
 ```
 
-In conclusion, model 19 (introductions + recent AMU) seems to explain best the data, followed closely by model 13 (introductions only). With the LRT, it is not significant to add variables to complexify model 13.
+The likelihood ratio test is significant.
 
-The most important factor explaining the level of colistin resistance measured in the farms is therefore the introductions. The AMU (all antibiotics) in the 3.3 (value of Beta) weeks preceding the sampling seems to play a role too, even though the p-value of the LRT is only 0.12 (not significant). On the contrary, the AMU at the beginning of the production cycle does not appear to play an important role, nor the resistance in the previous samples in the same flock (autocorrelation).
+Next step is compare these ratios: [AIC weights of models 20 and 22] /  [AIC weights of model 19]:
 
-### Alternative analysis
+```{r}
+print(tab_aic_ll$AIC_weights[20] /tab_aic_ll$AIC_weights[19])
+print(tab_aic_ll$AIC_weights[22] /tab_aic_ll$AIC_weights[19])
 
-An other way to perform the analysis could be to:
+bbmle::anova(lfit[[19]], lfit[[20]])
+bbmle::anova(lfit[[19]], lfit[[22]])
 
-1) Compare models without introduction (models 1 to 12)
-2) Among the best of them (highest AIC weight), compute the E-M algorithm to check if adding introductions improves the fit
-3) Compare the models that are left
-
-Among models 1-12, we compare AIC weights:
-
-```{r, fig.width=8, fig.height=6}
-l_aic = unlist(lapply(X = lfit[1:12], FUN = AIC))
-
-l_aic = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
-
-print(l_aic)
-rm(l_aic)
 ```
 
-we select models 7 (AIC weight = 44.3%) and 8 (AIC weight = 23.2%), and perform the E-M algorithm with them only. In the end, we therefore compare models 7, 8, 19 and 20:
+In conclusion, model 19 (introductions + recent AMU) seems to explain best the data (highest AIC weight). With the LRT, it is not significant to add variables to complexify model 19.
 
+The most important factor explaining the level of colistin resistance measured in the farms is therefore the introductions. The AMU (colistin) in the 1 week preceding the sampling plays a role too. On the contrary, the AMU at the beginning of the production cycle does not appear to play an important role, nor the resistance in the previous samples in the same flock (autocorrelation).
 
-```{r, fig.width=8, fig.height=6}
-l_aic = unlist(lapply(X = lfit[c(7,8,19,20)], FUN = AIC))
+### Spatial autocorrelation of the probability of introduction
 
-l_aic = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
-
-print(l_aic)
-rm(l_aic)
-```
-
-In this case, model 19 (AIC weight = 73%) is the final model chosen.
-
-### Correlation between the probability of introduction and the geographical location
-
-Now we computed the probability of introduction for each sample (2 per farm). We want to check if the probability of introduction is spatially autocorrelated.
+Now we computed the probability of introduction for each sample (2 per farm), we want to check if the probability of introduction is spatially autocorrelated.
 
 We load the GPS data (`gps_farms`):
 
@@ -1264,7 +1273,7 @@ prob_intro_farms$Farm = rownames(weeks_samp)[prob_intro_farms$Farm]
 prob_intro_farms$Farm = substr(prob_intro_farms$Farm, 1, 3)
 ```
 
-We add GPS information to `prob_intro_farms`:
+We add GPS information to `prob_intro_farms`. We plot the 2 samples of each farm slighlty shifted, to observe both of them not overlapped.
 
 ```{r, fig.width=7, fig.height=6}
 prob_intro_farms = merge(x = prob_intro_farms, y = gps_farms, by = "Farm", all.x = T)
