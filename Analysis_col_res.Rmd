@@ -201,23 +201,55 @@ if(type_res_data == "growth_curves"){
 }
 ```
 
-We therefore select concentration 1. We average the 2 repetitions of a same sample, and reshape the data to obtain `auc_ob`. We standardize the AUC values to range between 0 (lowest value) and 1 (highest value).
+There are 2 options:
+
+* `ratio_auc = F`: We select the concentration for which the "van der Eijk's A" statistic is closest to 0, therefore concentration 1 in this case. We average the 2 repetitions of a same sample, and reshape the data to obtain `auc_ob`.
+
+* `ratio_auc = T`: We select as measure of resistance the AUC of the ratio of OD of [Conc. 2]/[Conc. 0] for each sample.
+
+In all cases, we standardize the AUC values to range between 0 (lowest value) and 1 (highest value).
 
 ```{r}
+
+ratio_auc = T
+
 if(type_res_data == "growth_curves"){
   
-  gcur = gcur[which(gcur$Conc. == 1),]
-  
-  gcur = dcast(gcur, SampleID + Conc. + FlockID + SamplPoint + Time ~ Repeat, value.var="value")
-  gcur$od = (gcur$`1` + gcur$`2`)/2
-  gcur = gcur[,c("SampleID", "Conc.", "FlockID", "SamplPoint", "Time", "od")]
+  if(ratio_auc){
+    
+    gcur = gcur[which(gcur$Conc. %in% c(0,2)),]
+
+    samples_with_all_data = intersect(unique(gcur$SampleID[gcur$Conc. == "0"]), unique(gcur$SampleID[gcur$Conc. == "2"]))
+    gcur = gcur[which(gcur$SampleID %in% samples_with_all_data),]
+    
+    gcur = dcast(gcur, SampleID + Conc. + FlockID + SamplPoint + Time ~ Repeat, value.var="value")
+    gcur$mean_repeat = rowMeans(cbind(gcur$`1`, gcur$`2`), na.rm = T)
+    
+    gcur = dcast(gcur, SampleID + FlockID + SamplPoint + Time ~ Conc., value.var="mean_repeat")
+    
+    gcur$od = gcur$`2`/gcur$`0`
+    
+    gcur = gcur[,c("SampleID", "FlockID", "SamplPoint", "Time", "od")]
+    rm(samples_with_all_data)
+    
+  }else{
+    
+    gcur = gcur[which(gcur$Conc. == 1),]
+    
+    gcur = dcast(gcur, SampleID + Conc. + FlockID + SamplPoint + Time ~ Repeat, value.var="value")
+    gcur$od = (gcur$`1` + gcur$`2`)/2
+    gcur = gcur[,c("SampleID", "Conc.", "FlockID", "SamplPoint", "Time", "od")]
+  }
   
   auc_ob = as.data.frame(matrix(NA, nrow = length(unique(gcur$FlockID)), ncol = length(unique(gcur$SamplPoint))))
   dimnames(auc_ob) = list(unique(gcur$FlockID), c("S", "M", "E"))
   for(flo in unique(gcur$FlockID)){
     for(sp in unique(gcur$SamplPoint)){
       if(length(15:50) == length(gcur$od[which((gcur$Time %in% (15:50)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])){
-        auc_ob[flo, sp] = trapz(x = 15:50, y = gcur$od[which((gcur$Time %in% (15:50)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])
+        
+        # times_with_data = gcur$Time[which(is.finite(gcur$od) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))]
+        
+        auc_ob[flo, sp] = trapz(x = (15:50), y = gcur$od[which((gcur$Time %in% (15:50)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])
       }else{
         print(paste0("Impossible to compute area under curve for flock ", flo, ", sampling point ", sp))
       }
@@ -231,7 +263,7 @@ if(type_res_data == "growth_curves"){
   
   res_data = auc_ob
 
-  rm(flo, sp, auc_ob)
+  rm(flo, sp, auc_ob, ratio_auc)
 }
 ```
 
@@ -792,11 +824,11 @@ fitplot = function(fitted_model, intro){
 Here, we test the full model's estimation (M-step on model 24), with one given introduction status for each observation. We use "bbmle" package for point estimates.
 
 ```{r, label="Test full model estimation", fig.width=6, fig.height=4}
-introd = c(rep(0, 4), 1, 0, 1, 1, 1, rep(0, 6), 1, 0, 1, rep(0, 3), 1, 0, 0, 1, rep(0, 7), 1, 0, 0, 1, 1, 1, 0, 1, rep(0, 5), 1, rep(0, 3))
-
-fit_mle2 = mle2(minuslogl = run2_intr(introd), method = "Nelder-Mead", control = list(maxit = 5000), start = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1)), Sd = logit(runif(1))))
-
-fitplot(fitted_model = fit_mle2, intro = introd)
+# introd = c(rep(0, 4), 1, 0, 1, 1, 1, rep(0, 6), 1, 0, 1, rep(0, 3), 1, 0, 0, 1, rep(0, 7), 1, 0, 0, 1, 1, 1, 0, 1, rep(0, 5), 1, rep(0, 3))
+# 
+# fit_mle2 = mle2(minuslogl = run2_intr(introd), method = "Nelder-Mead", control = list(maxit = 5000), start = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1)), Sd = logit(runif(1))))
+# 
+# fitplot(fitted_model = fit_mle2, intro = introd)
 ```
 
 ```{r}
@@ -1079,7 +1111,7 @@ rm(res_data_saved, results_mod13, results_mod19, beta_fake, alpha_fake, fake_res
 If the computation was already performed, `alread_comp = T`.
 
 ```{r}
-alread_comp = T
+alread_comp = F
 ```
 
 ### Estimation of models 1 to 12 without introduction
@@ -1319,7 +1351,7 @@ val_exp = seq(0,10,0.01)[-1]
 
 plot(x = val_exp, y = sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",], type="l", main = "p-value (there is spatial correlation if p<0.05)", xlab = "k", ylab = "p-value") + lines(x = c(0, 100000), y = c(0.05, 0.05), col = "red")
 
-plot(x = val_exp, y = sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["max_dist",], type="l", main = "Maximum distance such as W(i,j) > 0.05", xlab = "k", ylab = "Distance (km)") + lines(x = rep(min(val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05]), 2), y = c(-10, 1000), col = "red") + lines(x = rep(max(val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05]), 2), y = c(-10, 1000), col = "red")
+plot(x = val_exp, y = sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["max_dist",], type="l", main = "Maximum distance such that W(i,j) > 0.05", xlab = "k", ylab = "Distance (km)") + lines(x = rep(min(val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05]), 2), y = c(-10, 1000), col = "red") + lines(x = rep(max(val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05]), 2), y = c(-10, 1000), col = "red")
 
 print("The values of k for which there is spatial autocorrelation (p-value < 0.05) are:")
 print(val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05])
@@ -1377,7 +1409,7 @@ p = ggplot()
 p = p + ggtitle("Probability of introduction in farms and area of significant spatial autocorrelation around them")
 p = p + xlab("Longitude") + ylab("Latitude")
 
-p = p  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=1, fill = "beige")
+p = p  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
 
 p = p + geom_tile(data = heat_map_grid, aes(x = Long, y = Lat, alpha = exp_dec), fill = "forestgreen")
 p = p + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
