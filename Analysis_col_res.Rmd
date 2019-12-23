@@ -88,6 +88,18 @@ library(ggsn)
 
 # Data
 
+We define options for the analysis (explained later):
+
+```{r}
+ratio_auc = F
+run_shiny = F
+definition_amu = "col"
+amu_model_is_quanti = F
+alread_comp = F
+test_method_comp = T
+
+```
+
 ## Load data
 
 We load data:
@@ -147,14 +159,23 @@ if(type_res_data == "growth_curves"){
   # Remove concentrations 3 and 6:
   gcur = gcur[which(!gcur$Conc. %in% c(3, 6)),]
   
+  # If we do the diff with concentration 0:
+  gcur = gcur[which(gcur$FlockID != "0464"),]
+  for (concentr in c(0.5, 1, 2, 4, 8, 12, 16)){
+    # Check that the same samples are compared: this sum must be 0
+    if(sum(rep(gcur$SampleID[gcur$Conc. == 0], each=2) != gcur$SampleID[gcur$Conc. == concentr]) != 0){print("CAUTION: Different samples are substracted"); break}
+    gcur$value[gcur$Conc. == concentr] = gcur$value[gcur$Conc. == concentr] - rep(gcur$value[gcur$Conc. == 0], each=2)
+  }
+  gcur = gcur[which(gcur$Conc. != 0),]
+  
   p = ggplot(data = gcur, aes(x=Time, group=obsID))
-  p = p + ggtitle("Optical Density in all samples for each concentration (in mg/L)")
-  p = p + xlab("Time (hours)") + ylab("OD (optical density)")
+  p = p + ggtitle("Optical Density in all samples for each concentration (in mg/L) - OD at conc=0")
+  p = p + xlab("Time (hours)") + ylab("OD difference")
   p = p + geom_line(aes(y=value), col="grey")
   p = p + facet_wrap(~Conc.)
   plot(p)
   
-  rm(p)
+  rm(p, concentr)
 }
 ```
 
@@ -211,8 +232,6 @@ In all cases, we standardize the AUC values to range between 0 (lowest value) an
 
 ```{r}
 
-ratio_auc = T
-
 if(type_res_data == "growth_curves"){
   
   if(ratio_auc){
@@ -263,7 +282,7 @@ if(type_res_data == "growth_curves"){
   
   res_data = auc_ob
 
-  rm(flo, sp, auc_ob, ratio_auc)
+  rm(flo, sp, auc_ob)
 }
 ```
 
@@ -621,7 +640,6 @@ server <- function(input, output){
   })
 }
 
-run_shiny = F
 if(run_shiny){
   shinyApp(ui=ui, server=server)
 }else{
@@ -693,10 +711,6 @@ rm(metramu, p)
 
 If `definition_amu = "col"`, the use is defined as the qualitative colistin use. If `definition_amu = "allab"`, the use is defined as the qualitative use of any antibiotic.
 
-```{r}
-definition_amu = "col"
-```
-
 ## Variations of the model
 
 The full model described above is model 24. Models 1 to 23 are simplifications of model 24.
@@ -752,7 +766,7 @@ run2 = function(aim="est", intr=introd, distrib_res="normal", mu, lambda1, lambd
   eta = sigmoid(eta)
   Sd = 3 * sigmoid(Sd)
 
-  obsdat = resamu(nwkseff=beta, quantuse=F, tempo_amu="exp_decay", thresh_res=0.4, ignore.nul=F, lag_amu_init=delta, obj="est", expo=definition_amu)
+  obsdat = resamu(nwkseff=beta, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", thresh_res=0.4, ignore.nul=F, lag_amu_init=delta, obj="est", expo=definition_amu)
   obsdat = obsdat[! is.na(obsdat$obsres),]
   obsdat$init[is.na(obsdat$init)] = mean(obsdat$init, na.rm=T) # 0
   obsdat$prev[is.na(obsdat$prev)] = mean(obsdat$prev, na.rm=T) # 0
@@ -817,22 +831,6 @@ fitplot = function(fitted_model, intro){
   p = p + scale_fill_gradient(low = "white", high = "blue")
   p
 }
-```
-
-### Example of estimation of the full model for one given introduction status
-
-Here, we test the full model's estimation (M-step on model 24), with one given introduction status for each observation. We use "bbmle" package for point estimates.
-
-```{r, label="Test full model estimation", fig.width=6, fig.height=4}
-# introd = c(rep(0, 4), 1, 0, 1, 1, 1, rep(0, 6), 1, 0, 1, rep(0, 3), 1, 0, 0, 1, rep(0, 7), 1, 0, 0, 1, 1, 1, 0, 1, rep(0, 5), 1, rep(0, 3))
-# 
-# fit_mle2 = mle2(minuslogl = run2_intr(introd), method = "Nelder-Mead", control = list(maxit = 5000), start = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1)), Sd = logit(runif(1))))
-# 
-# fitplot(fitted_model = fit_mle2, intro = introd)
-```
-
-```{r}
-rm(introd, fit_mle2)
 ```
 
 ### Function repeating the fit several times
@@ -976,7 +974,7 @@ We repeat the algorithm several times to make sure the whole space has been expl
 Convergence is defined as: the distance between the likelihood and the former likelihood is less than 1, 3 times in a row.
 
 ```{r}
-EM_algo <- function(modnum, numb_rep_algo=3, tol=1, max.step=50) {
+EM_algo <- function(modnum, numb_rep_algo=3, tol=1, max.step=30) {
 
   repetalgo = list()
   repetalgo_minloglik = c()
@@ -987,13 +985,13 @@ EM_algo <- function(modnum, numb_rep_algo=3, tol=1, max.step=50) {
     step = 0
     minloglik = 10^6
     
-    raw_params = list(mu = logit(runif(1)), lambda1 = runif(1), lambda2 = runif(1), alpha = runif(1), beta = logit(runif(1)), teta = runif(1), delta = logit(runif(1)), eta = logit(runif(1)), Sd = logit(runif(1)), p_intro = runif(1))
+    raw_params = list(mu = logit(runif(1)), lambda1 = runif(1,-10,10), lambda2 = runif(1,-10,10), alpha = runif(1,-10,10), beta = logit(runif(1)), teta = runif(1,-10,10), delta = logit(runif(1)), eta = logit(runif(1)), Sd = logit(runif(1)), p_intro = runif(1))
     
     obs_res = resamu(obj="est", nwkseff=1, thresh_res=0.5, lag_amu_init=1, expo=definition_amu)$obsres
     obs_res = obs_res[! is.na(obs_res)]
 
     counting_for_convergence = 0
-    while((counting_for_convergence <3) & (step <= max.step+1)){
+    while((counting_for_convergence <2) & (step <= max.step+1)){
       step = step +1
       if(step == max.step+1){
         print(paste0("Convergence of the likelihood was not reached after ", max.step, " steps."))
@@ -1019,100 +1017,335 @@ EM_algo <- function(modnum, numb_rep_algo=3, tol=1, max.step=50) {
     }
     print(paste0("Final step: ", step)); cat("\n")
     
-    if(step == max.step+1){write.table(c(), file=paste0("C:/Users/Jonathan/Desktop/Model ", modnum, ", iteration ", algorep_ite, " ouf of ", numb_rep_algo, " - no convergence of the likelihood"))}
+    if(step == max.step+1){write.table(c(), file=paste0("C:/Users/Jonathan/Desktop/Model ", modnum, ", iteration ", algorep_ite, " out of ", numb_rep_algo, " - no convergence of the likelihood"))}
     
     repetalgo[[algorep_ite]] = list(modstep, raw_params, introductions, minloglik, param_true_format, number_obs=length(obs_res), cycle_id)
     repetalgo_minloglik[algorep_ite] = minloglik
   }
   
-  save(repetalgo, file = paste0("C:/Users/Jonathan/Desktop/resul_", definition_amu, "_mod_", modnum, ".rdata"))
+  save(repetalgo, file = paste0("C:/Users/Jonathan/Desktop/resul_", definition_amu, "_isquanti", amu_model_is_quanti, "_mod_", modnum, ".rdata"))
 
   repetalgo[[which.min(repetalgo_minloglik)]]
 }
 ```
 
-### Test of the E-M algorithm on simulated data
+### Validation of the method on simulated data
 
-From the real AMU data, we want to create fake data of resistance showing a clear relationship between use and resistance. We also want to add fake introductions above this. This is to test the ability of the algorithm to detect an effect of the recent AMU on resistance, along with introductions.
+From the real AMU data, we use simulated (fake) data of resistance to test our method on 4 scenarios:
+
+- No linear relationship between recent use and resistance, and no introductions (scenario 1)
+- No linear relationship between recent use and resistance, and introductions (scenario 2)
+- Linear relationship between recent use and resistance, and no introductions (scenario 3)
+- Linear relationship between recent use and resistance, and introductions (scenario 4)
+
+We fit models 1, 7, 13 and 19 in these 4 scenarios. The objective is to test the ability of our method to detect such situations.
 
 First, we save the true resistance data:
 
 ```{r}
 res_data_saved = res_data
+rm(res_data)
+
 ```
 
-We create fake resistance data such that the relationship with AMU is linear, with $\beta_{fake} = 8$ (`beta_fake`) and $\alpha_{fake} = 0.4$ (`alpha_fake`). Note that we add some noise.
+#### Scenario 1
+
+We create fake resistance data such that there is no linear relationship with recent AMU and no introduction: the resistance just follows a normal distribution of mean 0.5.
 
 ```{r, fig.width=7, fig.height=5}
-beta_fake = 8
-alpha_fake = 0.4
+if(test_method_comp){
+  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_1.rdata")
+  res_data = test_scenario_1[[1]]
+}else{
+  res_data = as.data.frame(cbind(res_data_saved$S, rnorm(n_cyc, 0.5, 0.05), rnorm(n_cyc, 0.5, 0.05)))
+}
 
-fake_res = run2(aim="pred", intr=0, mu=logit(0.05), lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]$predmod
-fake_res = fake_res + rnorm(length(fake_res), 0, 0.05)
+resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
 
-res_data = as.data.frame(cbind(res_data$S, matrix(c(fake_res[1:40], NA, fake_res[41:49]), nrow=length(res_data$S), ncol=2, byrow=T)))
-
-resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo=definition_amu)
 ```
 
-Now we add some introductions in observations with low AMU, to simulate the fact observations with low AMU have sometimes a high resistance:
+We fit models 1, 7, 13, 19:
+
+```{r, label="E-M algorithm on fake resistance data (all models)", fig.width=6, fig.height=4}
+
+if(test_method_comp){
+  fit_model_1 = test_scenario_1[[2]]
+  fit_model_7 = test_scenario_1[[3]]
+  results_mod13 = test_scenario_1[[4]]
+  results_mod19 = test_scenario_1[[5]]
+}else{
+  fit_model_1 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
+
+  fit_model_7 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
+
+  results_mod13 = EM_algo(modnum=13, numb_rep_algo=3)
+
+  results_mod19 = EM_algo(modnum=19, numb_rep_algo=3)
+  
+  test_scenario_1 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
+  save(test_scenario_1, file = "C:/Users/Jonathan/Desktop/test_scenario_1.rdata")
+}
+
+fitplot(fitted_model = fit_model_1, intro = 0)
+fitplot(fitted_model = fit_model_7, intro = 0)
+fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
+fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+
+rm(res_data)
+
+```
+
+Let us compare models' AIC. Minimum AIC should be model 1.
+
+```{r}
+print("AIC of model 1:")
+AIC(fit_model_1)
+
+print("AIC of model 7:")
+AIC(fit_model_7)
+
+print("AIC of model 13:")
+AIC(results_mod13[[1]]) + 2*results_mod13[["number_obs"]]
+
+print("AIC of model 19:")
+AIC(results_mod19[[1]]) + 2*results_mod19[["number_obs"]]
+
+```
+
+#### Scenario 2
+
+We create fake resistance data such that there is no linear relationship with recent AMU but there are introductions: the resistance follows a normal distribution of mean 0.2 (no introduction) or 0.7 (an introduction occurred).
 
 ```{r, fig.width=7, fig.height=5}
-introd_fake = sample(x = which(fake_res < 0.2), size = round(0.5 * length(which(fake_res < 0.2))))
-fake_res[introd_fake] = fake_res[introd_fake] + rnorm(length(introd_fake), 0.5, 0.05)
+if(test_method_comp){
+  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_2.rdata")
+  res_data = test_scenario_2[[1]]
+}else{
+  res_data = as.data.frame(cbind(res_data_saved$S, rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.7,0.3)), rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.7,0.3))))
+}
 
-res_data = res_data_saved
-res_data = as.data.frame(cbind(res_data$S, matrix(c(fake_res[1:40], NA, fake_res[41:49]), nrow=length(res_data$S), ncol=2, byrow=T)))
-
-resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo=definition_amu)
-```
-
-Therefore, we are in a situation where the fake resistance data was simulated by model 19 (introductions + recent AMU). We want to test now if the algorithm can detect the relationship between AMU and fake resistance data. We also want to know if model 19 is selected against model 13 (introductions only).
-
-We apply the algorithm on model 13:
-
-```{r, label="E-M algorithm on fake resistance data (model 13)", fig.width=6, fig.height=4}
-# results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
-# fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
+resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
 
 ```
 
-And we apply the algorithm on model 19:
+We fit models 1, 7, 13, 19:
 
-```{r, label="E-M algorithm on fake resistance data (model 19)", fig.width=6, fig.height=4}
-# results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
-# fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+```{r, label="E-M algorithm on fake resistance data (all models)", fig.width=6, fig.height=4}
+
+if(test_method_comp){
+  fit_model_1 = test_scenario_2[[2]]
+  fit_model_7 = test_scenario_2[[3]]
+  results_mod13 = test_scenario_2[[4]]
+  results_mod19 = test_scenario_2[[5]]
+}else{
+  fit_model_1 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
+
+  fit_model_7 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
+
+  results_mod13 = EM_algo(modnum=13, numb_rep_algo=3)
+
+  results_mod19 = EM_algo(modnum=19, numb_rep_algo=3)
+  
+  test_scenario_2 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
+  save(test_scenario_2, file = "C:/Users/Jonathan/Desktop/test_scenario_2.rdata")
+}
+
+fitplot(fitted_model = fit_model_1, intro = 0)
+fitplot(fitted_model = fit_model_7, intro = 0)
+fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
+fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+
+rm(res_data)
 
 ```
 
-The fit seems good. Let us compare both models' AIC:
+Let us compare models' AIC. Minimum AIC should be model 13.
 
 ```{r}
-# print("AIC of model 13:")
-# AIC(results_mod13[[1]]) + results_mod13[["number_obs"]]
-# 
-# print("AIC of model 19:")
-# AIC(results_mod19[[1]]) + results_mod19[["number_obs"]]
+print("AIC of model 1:")
+AIC(fit_model_1)
+
+print("AIC of model 7:")
+AIC(fit_model_7)
+
+print("AIC of model 13:")
+AIC(results_mod13[[1]]) + 2*results_mod13[["number_obs"]]
+
+print("AIC of model 19:")
+AIC(results_mod19[[1]]) + 2*results_mod19[["number_obs"]]
 
 ```
 
-The algorithm detects the relationship between use and fake resistance, and model 19 has a lower AIC than model 13.
+#### Scenario 3
 
-We delete the fake resistance data and come back to the true data:
+We create fake resistance data such that the relationship with recent AMU is linear, with $\beta_{fake} = 8$ (`beta_fake`) and $\alpha_{fake} = 0.4$ (`alpha_fake`).
+
+```{r, fig.width=7, fig.height=5}
+if(test_method_comp){
+  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_3.rdata")
+  res_data = test_scenario_3[[1]]
+}else{
+  beta_fake = 8
+  alpha_fake = 0.4
+  
+  res_data = res_data_saved
+  fake_res = run2(aim="pred", intr=0, mu=logit(0.05), lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]$predmod
+  rm(res_data)
+  fake_res = fake_res + rnorm(length(fake_res), 0, 0.05)
+  
+  na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
+  if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
+  fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
+  
+  res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
+  
+  rm(beta_fake, alpha_fake, fake_res, na_res_val)
+}
+
+resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
+
+```
+
+We fit models 1, 7, 13, 19:
+
+```{r, label="E-M algorithm on fake resistance data (all models)", fig.width=6, fig.height=4}
+
+if(test_method_comp){
+  fit_model_1 = test_scenario_3[[2]]
+  fit_model_7 = test_scenario_3[[3]]
+  results_mod13 = test_scenario_3[[4]]
+  results_mod19 = test_scenario_3[[5]]
+}else{
+  fit_model_1 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
+
+  fit_model_7 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
+
+  results_mod13 = EM_algo(modnum=13, numb_rep_algo=3)
+
+  results_mod19 = EM_algo(modnum=19, numb_rep_algo=3)
+  
+  test_scenario_3 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
+  save(test_scenario_3, file = "C:/Users/Jonathan/Desktop/test_scenario_3.rdata")
+}
+
+fitplot(fitted_model = fit_model_1, intro = 0)
+fitplot(fitted_model = fit_model_7, intro = 0)
+fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
+fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+
+rm(res_data)
+
+```
+
+Let us compare models' AIC. Minimum AIC should be model 7.
+
+```{r}
+print("AIC of model 1:")
+AIC(fit_model_1)
+
+print("AIC of model 7:")
+AIC(fit_model_7)
+
+print("AIC of model 13:")
+AIC(results_mod13[[1]]) + 2*results_mod13[["number_obs"]]
+
+print("AIC of model 19:")
+AIC(results_mod19[[1]]) + 2*results_mod19[["number_obs"]]
+
+```
+
+#### Scenario 4
+
+We create fake resistance data such that the relationship with recent AMU is linear, with $\beta_{fake} = 8$ (`beta_fake`) and $\alpha_{fake} = 0.4$ (`alpha_fake`). We add introductions for some samples.
+
+```{r, fig.width=7, fig.height=5}
+if(test_method_comp){
+  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_4.rdata")
+  res_data = test_scenario_4[[1]]
+}else{
+  beta_fake = 8
+  alpha_fake = 0.4
+  
+  res_data = res_data_saved
+  fake_res = run2(aim="pred", intr=0, mu=logit(0.05), lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]$predmod
+  rm(res_data)
+  fake_res = fake_res + base::sample(x = c(0,0.5), size = length(fake_res), replace = T, prob = c(0.7,0.3)) + rnorm(length(fake_res), 0, 0.05)
+  
+  introd_fake = sample(x = which(fake_res < 0.4), size = round(0.3*sum(fake_res < 0.4)))
+  fake_res[introd_fake] = fake_res[introd_fake] + 0.6
+
+  na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
+  if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
+  fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
+  
+  res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
+  
+  rm(beta_fake, alpha_fake, introd_fake, fake_res, na_res_val)
+}
+
+resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
+
+```
+
+We fit models 1, 7, 13, 19:
+
+```{r, label="E-M algorithm on fake resistance data (all models)", fig.width=6, fig.height=4}
+
+if(test_method_comp){
+  fit_model_1 = test_scenario_4[[2]]
+  fit_model_7 = test_scenario_4[[3]]
+  results_mod13 = test_scenario_4[[4]]
+  results_mod19 = test_scenario_4[[5]]
+}else{
+  fit_model_1 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
+
+  fit_model_7 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
+
+  results_mod13 = EM_algo(modnum=13, numb_rep_algo=3)
+
+  results_mod19 = EM_algo(modnum=19, numb_rep_algo=3)
+  
+  test_scenario_4 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
+  save(test_scenario_4, file = "C:/Users/Jonathan/Desktop/test_scenario_4.rdata")
+}
+
+fitplot(fitted_model = fit_model_1, intro = 0)
+fitplot(fitted_model = fit_model_7, intro = 0)
+fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
+fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+
+rm(res_data)
+
+```
+
+Let us compare models' AIC. Minimum AIC should be model 19.
+
+```{r}
+print("AIC of model 1:")
+AIC(fit_model_1)
+
+print("AIC of model 7:")
+AIC(fit_model_7)
+
+print("AIC of model 13:")
+AIC(results_mod13[[1]]) + 2*results_mod13[["number_obs"]]
+
+print("AIC of model 19:")
+AIC(results_mod19[[1]]) + 2*results_mod19[["number_obs"]]
+
+```
+
+
+After these tests, we delete the fake resistance data and come back to the true data:
 
 ```{r}
 res_data = res_data_saved
-
-rm(res_data_saved, results_mod13, results_mod19, beta_fake, alpha_fake, fake_res, introd_fake)
+rm(res_data_saved, test_scenario_1, test_scenario_2, test_scenario_3, test_scenario_4, results_mod13, results_mod19, fit_model_1, fit_model_7)
 ```
 
 ## Results
 
 If the computation was already performed, `alread_comp = T`.
-
-```{r}
-alread_comp = F
-```
 
 ### Estimation of models 1 to 12 without introduction
 
@@ -1121,7 +1354,12 @@ First, we fit models that do not take into account the introductions. For them, 
 ```{r, label="Estimation of the models without introduction"}
 
 if(alread_comp){
-  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp/lfit_", definition_amu,".rdata"))
+  if(ratio_auc){
+    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp - Ratio [2]-[0]/lfit_", definition_amu,".rdata"))
+  }else{
+    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp/lfit_", definition_amu,".rdata"))
+  }
+  
 }else{
   introd = 0
   lfit = list()
@@ -1162,31 +1400,36 @@ We repeat the algorithm 5 times (with different seeds) per model, and each maxim
 ```{r, label="E-M algorithm on all models"}
 
 if(alread_comp){
-  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp/resulpar_", definition_amu, "_all.rdata"))
+  if(ratio_auc){
+    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp - Ratio [2]-[0]/resulpar_", definition_amu, "_all.rdata"))
+  }else{
+    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp/resulpar_", definition_amu, "_all.rdata"))
+  }
+  
 }else{
   t = as.numeric(Sys.time())
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("definition_amu","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resulpar_13to21 = parLapply(cl, X=13:21, fun=EM_algo, numb_rep_algo=3)
   stopCluster(cl)
-  save(resulpar_13to21, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_13to21.rdata"))
+  save(resulpar_13to21, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_13to21.rdata"))
   
   cl<-makeCluster(3)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("definition_amu","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resulpar_22to24 = parLapply(cl, X=22:24, fun=EM_algo, numb_rep_algo=3)
   stopCluster(cl)
-  save(resulpar_22to24, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_22to24.rdata"))
-  
+  save(resulpar_22to24, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_22to24.rdata"))
+
   resulpar = c(resulpar_13to21, resulpar_22to24)
-  save(resulpar, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_all.rdata"))
+  save(resulpar, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_all.rdata"))
 
   as.numeric(Sys.time()) - t
   
   for(m in 1:12){lfit[[m+12]] = resulpar[[m]][[1]]}
-  save(lfit, file = paste0("C:/Users/Jonathan/Desktop/lfit_", definition_amu, ".rdata"))
+  save(lfit, file = paste0("C:/Users/Jonathan/Desktop/lfit_", definition_amu, "_isquanti", amu_model_is_quanti, ".rdata"))
   rm(m, cl)
 }
 
@@ -1205,7 +1448,7 @@ where $N$ is the total number of models, and $AIC_k$ is the AIC of model $k$.
 ```{r, fig.width=8, fig.height=6}
 l_loglik = unlist(lapply(X = lfit, FUN = logLik))
 l_aic = unlist(lapply(X = lfit, FUN = AIC))
-l_aic[13:24] = l_aic[13:24] + resulpar[[1]][["number_obs"]]
+l_aic[13:24] = l_aic[13:24] + 2*resulpar[[1]][["number_obs"]]
 
 l_aic_weights = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
 
@@ -1305,7 +1548,8 @@ gps_farms = gps_farms[! is.na(gps_farms$Lat),]
 We gather in a same data frame the farm IDs and introduction probabilities (`prob_intro_farms`):
 
 ```{r}
-prob_intro_farms = data.frame(Farm = resulpar[[7]][[7]], Prob = resulpar[[7]][[3]])
+max_AICweight_intro_model = which.max(tab_aic_ll$AIC_weights) - 12
+prob_intro_farms = data.frame(Farm = resulpar[[max_AICweight_intro_model]][[7]], Prob = resulpar[[max_AICweight_intro_model]][[3]])
 prob_intro_farms$Farm = rownames(weeks_samp)[prob_intro_farms$Farm]
 prob_intro_farms$Farm = substr(prob_intro_farms$Farm, 1, 3)
 ```
@@ -1353,19 +1597,27 @@ plot(x = val_exp, y = sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["
 
 plot(x = val_exp, y = sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["max_dist",], type="l", main = "Maximum distance such that W(i,j) > 0.05", xlab = "k", ylab = "Distance (km)") + lines(x = rep(min(val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05]), 2), y = c(-10, 1000), col = "red") + lines(x = rep(max(val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05]), 2), y = c(-10, 1000), col = "red")
 
-print("The values of k for which there is spatial autocorrelation (p-value < 0.05) are:")
-print(val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05])
+k_val_with_spatial_autocorr = val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05]
+if(length(k_val_with_spatial_autocorr) > 0){
+  print("The values of k for which there is spatial autocorrelation (p-value < 0.05) are:")
+  print(k_val_with_spatial_autocorr)
+}else{
+  print("There is no value of k for which there is spatial autocorrelation (p-value < 0.05).")
+}
 
 ```
 
-We plot a map with the probability of introduction for each observation. (It's possible to shift the dots to plot both observations of a farm side by side.)
+In case we found values of k for which there is spatial autocorrelation (p-value < 0.05), we plot a map with the probability of introduction for each observation. (It's possible to shift the dots to plot both observations of a farm side by side.)
 
 We first load the data on commune borders in the districts of ViParc study:
 
 ```{r, label="Load commune borders data"}
-sf_file = readOGR("C:/Users/Jonathan/Desktop/Programmes/amr_vietnam/Shapefiles/VN National Commune_new.shp")
-
-sf_file_df = fortify(sf_file[sf_file$D_CODE %in% c(866, 872, 873),])
+if(length(k_val_with_spatial_autocorr) > 0){
+  sf_file = readOGR("C:/Users/Jonathan/Desktop/Programmes/amr_vietnam/Shapefiles/VN National Commune_new.shp")
+  sf_file_df = fortify(sf_file[sf_file$D_CODE %in% c(866, 872, 873),])
+}else{
+  print("There is no value of k for which there is spatial autocorrelation (p-value < 0.05).")
+}
 
 ```
 
@@ -1374,55 +1626,60 @@ In green is the value of the weight $W$ around each farm, with $k$ taken such th
 If we want to plot the green area around one farm only (as an example), we set `plot_only_one_area = T`.
 
 ```{r, fig.width=8, fig.height=5}
-plot_only_one_area = F
-coef_exp_dec = val_exp[which.min(as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]))]
-
-if(plot_only_one_area == T){
+if(length(k_val_with_spatial_autocorr) > 0){
+  plot_only_one_area = F
+  coef_exp_dec = val_exp[which.min(as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]))]
   
-  ref_point = 21
-  heat_map_lat = seq(prob_intro_farms$Lat[ref_point]-0.1, prob_intro_farms$Lat[ref_point]+0.1, 0.001)
-  heat_map_long = seq(prob_intro_farms$Long[ref_point]-0.1, prob_intro_farms$Long[ref_point]+0.1, 0.001)
-  heat_map_grid = expand.grid(heat_map_long, heat_map_lat)
-  colnames(heat_map_grid) = c("Long", "Lat")
-  
-  heat_map_grid$dist_ref = spDistsN1(pts = as.matrix(heat_map_grid), pt = as.numeric(prob_intro_farms[ref_point, c("Long", "Lat")]), longlat = T)
-  heat_map_grid$exp_dec = exp(-coef_exp_dec * heat_map_grid$dist_ref)
-  
-}else{
-  
-  heat_map_lat = seq(min(prob_intro_farms$Lat)-0.05, max(prob_intro_farms$Lat)+0.05, 0.001)
-  heat_map_long = seq(min(prob_intro_farms$Long)-0.05, max(prob_intro_farms$Long)+0.05, 0.001)
-  heat_map_grid = expand.grid(heat_map_long, heat_map_lat)
-  colnames(heat_map_grid) = c("Long", "Lat")
-  heat_map_grid$exp_dec = 0
-  
-  for(ref_point in 1:nrow(prob_intro_farms)){
-    dist_this_ref = spDistsN1(pts = as.matrix(heat_map_grid[,c("Long", "Lat")]), pt = as.numeric(prob_intro_farms[ref_point, c("Long", "Lat")]), longlat = T)
-    exp_dec_this_ref = exp(-coef_exp_dec * dist_this_ref)
+  if(plot_only_one_area == T){
     
-    heat_map_grid$exp_dec = pmax(heat_map_grid$exp_dec, exp_dec_this_ref)
+    ref_point = 21
+    heat_map_lat = seq(prob_intro_farms$Lat[ref_point]-0.1, prob_intro_farms$Lat[ref_point]+0.1, 0.001)
+    heat_map_long = seq(prob_intro_farms$Long[ref_point]-0.1, prob_intro_farms$Long[ref_point]+0.1, 0.001)
+    heat_map_grid = expand.grid(heat_map_long, heat_map_lat)
+    colnames(heat_map_grid) = c("Long", "Lat")
+    
+    heat_map_grid$dist_ref = spDistsN1(pts = as.matrix(heat_map_grid), pt = as.numeric(prob_intro_farms[ref_point, c("Long", "Lat")]), longlat = T)
+    heat_map_grid$exp_dec = exp(-coef_exp_dec * heat_map_grid$dist_ref)
+    
+  }else{
+    
+    heat_map_lat = seq(min(prob_intro_farms$Lat)-0.05, max(prob_intro_farms$Lat)+0.05, 0.001)
+    heat_map_long = seq(min(prob_intro_farms$Long)-0.05, max(prob_intro_farms$Long)+0.05, 0.001)
+    heat_map_grid = expand.grid(heat_map_long, heat_map_lat)
+    colnames(heat_map_grid) = c("Long", "Lat")
+    heat_map_grid$exp_dec = 0
+    
+    for(ref_point in 1:nrow(prob_intro_farms)){
+      dist_this_ref = spDistsN1(pts = as.matrix(heat_map_grid[,c("Long", "Lat")]), pt = as.numeric(prob_intro_farms[ref_point, c("Long", "Lat")]), longlat = T)
+      exp_dec_this_ref = exp(-coef_exp_dec * dist_this_ref)
+      
+      heat_map_grid$exp_dec = pmax(heat_map_grid$exp_dec, exp_dec_this_ref)
+    }
+  
   }
-
+  
+  p = ggplot()
+  p = p + ggtitle("Probability of introduction in farms and area of significant spatial autocorrelation around them")
+  p = p + xlab("Longitude") + ylab("Latitude")
+  
+  p = p  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
+  
+  p = p + geom_tile(data = heat_map_grid, aes(x = Long, y = Lat, alpha = exp_dec), fill = "forestgreen")
+  p = p + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
+  p = p + geom_point(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 2)
+  # p = p + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 2, width = 0.003, height = 0.003)
+  
+  p = p + scale_fill_gradient2(name = "Probability of introduction:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
+  p = p + scale_alpha_continuous(name = "Value in the weight matrix:", range = c(0,1))
+  p = p + ggsn::scalebar(dist = 5, location = "topright", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
+  p = p + blank()
+  p
+  
+  rm(heat_map_lat, heat_map_long, dist_this_ref, exp_dec_this_ref, ref_point)
+}else{
+  print("There is no value of k for which there is spatial autocorrelation (p-value < 0.05).")
 }
 
-p = ggplot()
-p = p + ggtitle("Probability of introduction in farms and area of significant spatial autocorrelation around them")
-p = p + xlab("Longitude") + ylab("Latitude")
-
-p = p  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
-
-p = p + geom_tile(data = heat_map_grid, aes(x = Long, y = Lat, alpha = exp_dec), fill = "forestgreen")
-p = p + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
-p = p + geom_point(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 2)
-# p = p + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 2, width = 0.003, height = 0.003)
-
-p = p + scale_fill_gradient2(name = "Probability of introduction:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
-p = p + scale_alpha_continuous(name = "Value in the weight matrix:", range = c(0,1))
-p = p + ggsn::scalebar(dist = 5, location = "topright", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
-p = p + blank()
-p
-
-rm(heat_map_lat, heat_map_long, dist_this_ref, exp_dec_this_ref, ref_point)
 ```
 
 
