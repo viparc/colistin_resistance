@@ -83,6 +83,8 @@ library(sp)
 library(ape)
 library(rgdal)
 library(ggsn)
+library(ggforce)
+library(dendextend)
 
 ```
 
@@ -95,7 +97,7 @@ ratio_auc = F
 run_shiny = F
 definition_amu = "col"
 amu_model_is_quanti = F
-alread_comp = F
+alread_comp = T
 test_method_comp = T
 
 ```
@@ -164,7 +166,12 @@ if(type_res_data == "growth_curves"){
   for (concentr in c(0.5, 1, 2, 4, 8, 12, 16)){
     # Check that the same samples are compared: this sum must be 0
     if(sum(rep(gcur$SampleID[gcur$Conc. == 0], each=2) != gcur$SampleID[gcur$Conc. == concentr]) != 0){print("CAUTION: Different samples are substracted"); break}
+    
     gcur$value[gcur$Conc. == concentr] = gcur$value[gcur$Conc. == concentr] - rep(gcur$value[gcur$Conc. == 0], each=2)
+    
+    # mean_this_time_conc_0 = rep(aggregate(gcur[gcur$Conc. == 0, c("Time", "value")], by = list(gcur$Time[gcur$Conc. == 0]), FUN = mean)$value, each = sum((gcur$Time == 1)&(gcur$Conc. == concentr)))
+    # gcur$value[gcur$Conc. == concentr] = gcur$value[gcur$Conc. == concentr] - mean_this_time_conc_0
+    
   }
   gcur = gcur[which(gcur$Conc. != 0),]
   
@@ -181,7 +188,7 @@ if(type_res_data == "growth_curves"){
 
 Our objective is to use a concentration that offers a distribution of areas under curve (AUC) as spread out as possible. We see that, in concentrations 0 and 0.5, no curve is totally flat, i.e. all samples show some growth. On the contrary, in concentrations 8, 12 and 16, most of the samples show no growth. Therefore, we need to choose between concentrations 1, 2 and 4, that all present a spread range of curves (and thus AUC).
 
-For these concentrations (1, 2 and 4), we compute the area under curve (AUC), for each sample, between t=15 hours and t=50 hours. This corresponds to the moment curves start to grow.
+For these concentrations (1, 2 and 4), we compute the area under curve (AUC), for each sample, between t=1 hours and t=79 hours.
 
 To measure how much the distributions of AUC are spread out for each concentration, we use the ["van der Eijk's A" statistic](https://en.wikipedia.org/wiki/Multimodal_distribution#van_der_Eijk's_A).  It ranges between -1 (perfect bimodality of the distribution) to +1 (perfect unimodality). A value of 0 corresponds to a uniform distribution. We select the concentration for which this statistic is closest to 0, because we aim to have both a spread distribution, and intermediary values of AUC (between high AUC - resistant samples - and low AUC - not resistant samples). We use package `agrmt`.
 
@@ -199,14 +206,16 @@ if(type_res_data == "growth_curves"){
       }
     }
     
-    list(agreement(table(factor(round(all_auc)))), all_auc)
+    list(agreement(table(factor(round(all_auc), levels = (min(round(all_auc)): max(round(all_auc)))))), all_auc, sd(all_auc))
   }
   
   distrib_auc = data.frame(conc = numeric(0), val = numeric(0))
   for(c in c(1, 2, 4)){
+    VdE_A = VdE_A_score(conc=c, t_start=1, t_end=79)
     print(paste("van der Eijk's A for concentration", c, ":"))
-    VdE_A = VdE_A_score(conc=c, t_start=15, t_end=50)
     print(VdE_A[[1]])
+    print(paste("Standard deviation for concentration", c, ":"))
+    print(VdE_A[[3]])
     distrib_auc = rbind(distrib_auc, data.frame(conc = c, val = VdE_A[[2]]))
   }
   
@@ -215,7 +224,7 @@ if(type_res_data == "growth_curves"){
   p = p + geom_histogram(bins = 15, fill = "royalblue4")
   p = p + facet_wrap(~conc)
   p = p + ggtitle("Distribution of AUC values for each concentration (in mg/L)")
-  p = p + xlab("AUC values") + ylab("Count")
+  p = p + xlab("Resistance values") + ylab("Count")
   plot(p)
   
   rm(c, VdE_A_score, distrib_auc, VdE_A, p)
@@ -264,11 +273,11 @@ if(type_res_data == "growth_curves"){
   dimnames(auc_ob) = list(unique(gcur$FlockID), c("S", "M", "E"))
   for(flo in unique(gcur$FlockID)){
     for(sp in unique(gcur$SamplPoint)){
-      if(length(15:50) == length(gcur$od[which((gcur$Time %in% (15:50)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])){
+      if(length(1:79) == length(gcur$od[which((gcur$Time %in% (1:79)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])){
         
         # times_with_data = gcur$Time[which(is.finite(gcur$od) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))]
         
-        auc_ob[flo, sp] = trapz(x = (15:50), y = gcur$od[which((gcur$Time %in% (15:50)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])
+        auc_ob[flo, sp] = trapz(x = (1:79), y = gcur$od[which((gcur$Time %in% (1:79)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])
       }else{
         print(paste0("Impossible to compute area under curve for flock ", flo, ", sampling point ", sp))
       }
@@ -421,7 +430,7 @@ legend(x=0, y=n_cyc+7, inset=0.5, legend=c("No antimicrobials used", "Antimicrob
 # 18th line starting from above
 p2 = ggplot(data = gcur[(gcur$SampleID == "0681E"),], aes(x=Time, y=od))
 p2 = p2 + xlab("Time (hours)") + ylab("OD")
-p2 = p2 + geom_ribbon(aes(x=ifelse((Time>15 & Time<=50), Time, 50), ymin=0, ymax=ifelse((Time>15 & Time<=50), od, od[Time==50])), alpha=1, fill="chartreuse4")
+p2 = p2 + geom_ribbon(aes(x=Time, ymin=0, ymax=od), alpha=1, fill="chartreuse4")
 p2 = p2 + geom_line(col="black", size=1)
 
 print(p2, vp=viewport(width = 0.205, height = 0.275, x = 0.94, y = 0.39, just = c("right", "bottom")))
@@ -754,7 +763,7 @@ Observations for which the resistance measure (model outcome) is absent are dele
 We also define `run2_intr` which is a wraper: its output is the function `run2` with the value of `intr` (input of `run2`) specified.
 
 ```{r}
-run2 = function(aim="est", intr=introd, distrib_res="normal", mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd){
+run2 = function(aim="est", intr=introd, type_mod="linear", mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd){
 
   mu = sigmoid(mu)
   lambda1 = lambda1
@@ -772,34 +781,57 @@ run2 = function(aim="est", intr=introd, distrib_res="normal", mu, lambda1, lambd
   obsdat$prev[is.na(obsdat$prev)] = mean(obsdat$prev, na.rm=T) # 0
   obsdat$introduc = intr
 
-  obsdat$predmod_intro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta
-  
-  obsdat$predmod_nointro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init
-  
-  obsdat$predmod = obsdat$introduc * obsdat$predmod_intro + (1-obsdat$introduc) * obsdat$predmod_nointro
+  if(type_mod == "linear"){
+    
+    obsdat$predmod_intro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta
+    
+    obsdat$predmod_nointro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init
+    
+    obsdat$predmod = obsdat$introduc * obsdat$predmod_intro + (1-obsdat$introduc) * obsdat$predmod_nointro
 
-  if(aim == "est"){
-    if(distrib_res == "normal"){
-      lik_intro = dnorm(x=obsdat$obsres, mean=obsdat$predmod_intro, sd=Sd)
-      lik_nointro = dnorm(x=obsdat$obsres, mean=obsdat$predmod_nointro, sd=Sd)
+    # total_loglik = dnorm(x=obsdat$obsres, mean=obsdat$predmod, sd=Sd, log=T)
+    lik_intro = dnorm(x=obsdat$obsres, mean=obsdat$predmod_intro, sd=Sd)
+    lik_nointro = dnorm(x=obsdat$obsres, mean=obsdat$predmod_nointro, sd=Sd)
+    total_loglik = log(obsdat$introduc * lik_intro + (1-obsdat$introduc) * lik_nointro)
+    total_loglik[is.infinite(total_loglik)] = -710
+
+    if(aim == "est"){
       
-      total_loglik = log(obsdat$introduc * lik_intro + (1-obsdat$introduc) * lik_nointro)
-      total_loglik[is.infinite(total_loglik)] = -710
-
       return(-sum(total_loglik))
       
-    }else{
-      print("Residuals distribution not defined.")
+    }else if (aim == "pred"){
+      
+      return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod", "cycle")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
     }
-  }else if (aim == "pred"){
-    return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod", "cycle")], minll = -sum(dnorm(x=obsdat$obsres, mean=obsdat$predmod, sd=Sd, log=T)), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
+  
+  }else if(type_mod == "glm_bin"){
+    
+    obsdat$glm_predmod_intro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta
+    obsdat$glm_predmod_intro = pracma::sigmoid(obsdat$glm_predmod_intro)
+    
+    obsdat$glm_predmod_nointro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init
+    obsdat$glm_predmod_nointro = pracma::sigmoid(obsdat$glm_predmod_nointro)
+    
+    obsdat$predmod = obsdat$introduc * obsdat$glm_predmod_intro + (1-obsdat$introduc) * obsdat$glm_predmod_nointro
+    
+    total_loglik = (obsdat$predmod^obsdat$obsres)*((1-obsdat$predmod)^(1-obsdat$obsres))
+    total_loglik[is.infinite(total_loglik)] = -710
+
+    if(aim == "est"){
+      
+      return(-sum(total_loglik))
+      
+    }else if (aim == "pred"){
+
+      return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod", "cycle")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
+    }
   }
 }
 
 # Factory/Wrapper function (returns a function with one of the parameters ("intr") fixed)
 run2_intr <- function(x) {
- function(aim="est", distrib_res="normal", mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)
-   run2(aim, intr=x, distrib_res, mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)
+ function(aim="est", type_mod="linear", mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)
+   run2(aim, intr=x, type_mod, mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)
 }
 
 ```
@@ -886,21 +918,25 @@ $$p(R_i \in M_{intro}) = \frac{exp(\frac{-(r_{intro}^i)^2}{2.\sigma^2})}{exp(\fr
 (Sources: http://www.cs.huji.ac.il/~yweiss/emTutorial.pdf ; http://www.di.fc.ul.pt/~jpn/r/EM/EM.html#eg-em-with-mix-of-two-linear-models)
 
 ```{r}
-E_step <- function(observed, params) {
+E_step_introperfarm <- function(observed, params) {
 
   sigma = 3 * sigmoid(params[["Sd"]]) # because the parameter is modified when estimated in function "run2"
   
-  lin_intro = run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
+  lin_intro = run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]][, c("predmod","cycle")]
   
-  lin_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
+  lin_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]][, c("predmod","cycle")]
 
   # Residuals of observations under models "Intro" and "No intro"
-  r_intro = abs(lin_intro - observed)
-  r_nointro = abs(lin_nointro - observed)
+  lin_intro$r = (abs(lin_intro$predmod - observed))^2
+  lin_nointro$r = (abs(lin_nointro$predmod - observed))^2
 
+   # Adds a column with the sum of r_intro for the 2 (or 1) sample of the same cycle:
+  lin_intro = merge(x = lin_intro, by.x = "cycle", y = stats::aggregate(x = lin_intro$r, by = list(lin_intro$cycle), FUN = sum), by.y = "Group.1")
+  lin_nointro = merge(x = lin_nointro, by.x = "cycle", y = stats::aggregate(x = lin_nointro$r, by = list(lin_nointro$cycle), FUN = sum), by.y = "Group.1")
+  
   # Residuals follow a normal distribution
-  exp_intro = exp(- r_intro^2/(2*sigma^2))
-  exp_nointro = exp(- r_nointro^2/(2*sigma^2))
+  exp_intro = exp(- lin_intro$x/(2*sigma^2))
+  exp_nointro = exp(- lin_nointro$x/(2*sigma^2))
 
   exp_intro = pmin(0.9999, exp_intro)
   exp_intro = pmax(0.0001, exp_intro)
@@ -912,6 +948,34 @@ E_step <- function(observed, params) {
 
   prob_intro
 }
+
+E_step <- function(observed, params) {
+  
+  sigma = 3 * sigmoid(params[["Sd"]]) # because the parameter is modified when estimated in function "run2"
+  
+  lin_intro = run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
+  
+  lin_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
+  
+  # Residuals of observations under models "Intro" and "No intro"
+  r_intro = abs(lin_intro - observed)
+  r_nointro = abs(lin_nointro - observed)
+  
+  # Residuals follow a normal distribution
+  exp_intro = exp(- r_intro^2/(2*sigma^2))
+  exp_nointro = exp(- r_nointro^2/(2*sigma^2))
+  
+  exp_intro = pmin(0.9999, exp_intro)
+  exp_intro = pmax(0.0001, exp_intro)
+  exp_nointro = pmin(0.9999, exp_nointro)
+  exp_nointro = pmax(0.0001, exp_nointro)
+  
+  # Probability of "Intro":
+  prob_intro = exp_intro / (exp_intro + exp_nointro)
+  
+  prob_intro
+}
+
 ```
 
 #### Function for the M step
@@ -1060,13 +1124,14 @@ if(test_method_comp){
   res_data = as.data.frame(cbind(res_data_saved$S, rnorm(n_cyc, 0.5, 0.05), rnorm(n_cyc, 0.5, 0.05)))
 }
 
+plot(hist(as.numeric(as.matrix(res_data)), nclass = 15), col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
 resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
 
 ```
 
 We fit models 1, 7, 13, 19:
 
-```{r, label="E-M algorithm on fake resistance data (all models)", fig.width=6, fig.height=4}
+```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
   fit_model_1 = test_scenario_1[[2]]
@@ -1124,13 +1189,14 @@ if(test_method_comp){
   res_data = as.data.frame(cbind(res_data_saved$S, rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.7,0.3)), rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.7,0.3))))
 }
 
+plot(hist(as.numeric(as.matrix(res_data)), nclass = 15), col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
 resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
 
 ```
 
 We fit models 1, 7, 13, 19:
 
-```{r, label="E-M algorithm on fake resistance data (all models)", fig.width=6, fig.height=4}
+```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
   fit_model_1 = test_scenario_2[[2]]
@@ -1202,13 +1268,14 @@ if(test_method_comp){
   rm(beta_fake, alpha_fake, fake_res, na_res_val)
 }
 
+plot(hist(as.numeric(as.matrix(res_data)), nclass = 15), col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
 resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
 
 ```
 
 We fit models 1, 7, 13, 19:
 
-```{r, label="E-M algorithm on fake resistance data (all models)", fig.width=6, fig.height=4}
+```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
   fit_model_1 = test_scenario_3[[2]]
@@ -1283,13 +1350,14 @@ if(test_method_comp){
   rm(beta_fake, alpha_fake, introd_fake, fake_res, na_res_val)
 }
 
+plot(hist(as.numeric(as.matrix(res_data)), nclass = 15), col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
 resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
 
 ```
 
 We fit models 1, 7, 13, 19:
 
-```{r, label="E-M algorithm on fake resistance data (all models)", fig.width=6, fig.height=4}
+```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
   fit_model_1 = test_scenario_4[[2]]
@@ -1357,7 +1425,7 @@ if(alread_comp){
   if(ratio_auc){
     load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp - Ratio [2]-[0]/lfit_", definition_amu,".rdata"))
   }else{
-    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp/lfit_", definition_amu,".rdata"))
+    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - Exp - Diff/lfit_", definition_amu, "_isquanti", amu_model_is_quanti, ".rdata"))
   }
   
 }else{
@@ -1403,7 +1471,7 @@ if(alread_comp){
   if(ratio_auc){
     load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp - Ratio [2]-[0]/resulpar_", definition_amu, "_all.rdata"))
   }else{
-    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp/resulpar_", definition_amu, "_all.rdata"))
+    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - Exp - Diff/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_all.rdata"))
   }
   
 }else{
@@ -1468,12 +1536,25 @@ p
 rm(p, plot_aic_ll, l_loglik, l_aic)
 ```
 
-Model 19 has the highest AIC weights (= lowest AIC). We plot its fit (observed VS predicted):
+According to the AIC, the best model is:
+
+```{r}
+max_AICweight_model = which.max(tab_aic_ll$AIC_weights)
+print(paste0("Model ", max_AICweight_model))
+
+```
+
+We plot its fit (observed VS predicted):
 
 ```{r, fig.width=6, fig.height=4}
-
-fitplot(fitted_model = resulpar[[7]][[1]], intro = resulpar[[7]][[3]])
-print(paste0("Probability of introduction in model 19: ", resulpar[[7]][[2]][["p_intro"]]))
+if(max_AICweight_model %in% (1:12)){
+  
+  fitplot(fitted_model = lfit[[max_AICweight_model]], intro = 0)
+  
+}else if(max_AICweight_model %in% (13:24)){
+  
+  fitplot(fitted_model = lfit[[max_AICweight_model]], intro = resulpar[[max_AICweight_model-12]][[3]])
+}
 
 ```
 
@@ -1491,50 +1572,18 @@ print(tab_aic_ll$AIC_weights[13] /tab_aic_ll$AIC_weights[1])
 
 ```
 
-The first contributing factor seems to be the introductions.
-
 ```{r}
-bbmle::anova(lfit[[1]], lfit[[13]])
+print(tab_aic_ll$AIC_weights[max_AICweight_model] /tab_aic_ll$AIC_weights[13])
+bbmle::anova(lfit[[max_AICweight_model]], lfit[[13]])
 
 ```
 
-The likelihood ratio test is significant.
+### Spatial analysis of the probability of introduction
 
-Next step is compare these ratios: [AIC weights of models 14, 16 and 19] /  [AIC weights of model 13]:
+Now we computed the probability of introduction (PoI) for each sample (2 per farm), we want to check if:
 
-```{r}
-print(tab_aic_ll$AIC_weights[14] /tab_aic_ll$AIC_weights[13])
-print(tab_aic_ll$AIC_weights[16] /tab_aic_ll$AIC_weights[13])
-print(tab_aic_ll$AIC_weights[19] /tab_aic_ll$AIC_weights[13])
-
-```
- The second most contributing variable seems to be the recent AMU.
- 
-```{r}
-bbmle::anova(lfit[[13]], lfit[[19]])
-
-```
-
-The likelihood ratio test is significant.
-
-Next step is compare these ratios: [AIC weights of models 20 and 22] /  [AIC weights of model 19]:
-
-```{r}
-print(tab_aic_ll$AIC_weights[20] /tab_aic_ll$AIC_weights[19])
-print(tab_aic_ll$AIC_weights[22] /tab_aic_ll$AIC_weights[19])
-
-bbmle::anova(lfit[[19]], lfit[[20]])
-bbmle::anova(lfit[[19]], lfit[[22]])
-
-```
-
-In conclusion, model 19 (introductions + recent AMU) seems to explain best the data (highest AIC weight). With the LRT, it is not significant to add variables to complexify model 19.
-
-The most important factor explaining the level of colistin resistance measured in the farms is therefore the introductions. The AMU (colistin) in the 1 week preceding the sampling plays a role too. On the contrary, the AMU at the beginning of the production cycle does not appear to play an important role, nor the resistance in the previous samples in the same flock (autocorrelation).
-
-### Spatial autocorrelation of the probability of introduction
-
-Now we computed the probability of introduction for each sample (2 per farm), we want to check if the probability of introduction is spatially autocorrelated.
+- the PoI is spatially autocorrelated
+- some areas have a higher or lower PoI.
 
 We load the GPS data (`gps_farms`):
 
@@ -1548,7 +1597,7 @@ gps_farms = gps_farms[! is.na(gps_farms$Lat),]
 We gather in a same data frame the farm IDs and introduction probabilities (`prob_intro_farms`):
 
 ```{r}
-max_AICweight_intro_model = which.max(tab_aic_ll$AIC_weights) - 12
+max_AICweight_intro_model = max_AICweight_model -12
 prob_intro_farms = data.frame(Farm = resulpar[[max_AICweight_intro_model]][[7]], Prob = resulpar[[max_AICweight_intro_model]][[3]])
 prob_intro_farms$Farm = rownames(weeks_samp)[prob_intro_farms$Farm]
 prob_intro_farms$Farm = substr(prob_intro_farms$Farm, 1, 3)
@@ -1561,126 +1610,342 @@ prob_intro_farms = merge(x = prob_intro_farms, y = gps_farms, by = "Farm", all.x
 
 ```
 
+We load the data on commune borders in the districts of ViParc study:
+
+```{r, label="Load commune borders data"}
+sf_file = readOGR("C:/Users/Jonathan/Desktop/Programmes/amr_vietnam/Shapefiles/VN National Commune_new.shp")
+sf_file_df = fortify(sf_file[sf_file$D_CODE %in% c(866, 872, 873),])
+
+```
+
+#### Assessing the spatial autocorrelation of the probability of introduction
+
 We compute the Moran's I statistic, defined as:
 
 $$I = \frac{N_{samp}\sum_{i,j}W_{i,j}(p_i-\bar{p})(p_j-\bar{p})}{\sum_{i,j}W_{i,j}\sum_{i}(p_i-\bar{p})^2}$$
 
-where $p_i$ is the probability of introduction computed for sample $i$, $\bar{p}$ is the mean of probabilities, and $N_{samp}$ the number of samples. $W$ is the weight matrix: the closer are samples $i$ and $j$, the higher is $W_{i,j}$. We define it as follows:
+where $p_i$ is the PoI computed for sample $i$, $\bar{p}$ is the mean of probabilities, and $N_{samp}$ the number of samples. $W$ is the weight matrix: the closer are samples $i$ and $j$, the higher is $W_{i,j}$. We define it as follows:
 
-$$W_{i,j} = e^{-k.D(i,j)}$$
-where $k$ is a tuned parameter, and $D(i,j)$ is the geographical distance between farms where samples $i$ and $j$ were sampled. Therefore, $W_{i,j} \le 1$ and the higher k, the smaller the distance $D(i,j)$ for which $W_{i,j}$ is not negligible ($W_{i,j} > 0.05$ for instance).
+$$W_{i,j} = g(k, D(i,j))$$
+where:
 
-Here, we compute the Moran's I for a range of values for $k$. Each time, we use package `ape` to test whether the probability of introduction $p$ is spatially autocorrelated: it is significantly the case when the p-value is lower than 0.05 (red line). We plot the values of the p-value depending on the values of $k$.
+* $D(i,j)$ is the geographical distance between farms where samples $i$ and $j$ were sampled.
+* $g$ is a decreasing function of $D(i,j)$, and $k$ a tuning parameter of $g$. We explore several possibilities for $g$ definition:
 
-We also plot the maximum distance $D(i,j)$ for which $W_{i,j} > 0.05$ (i.e. the maximum distance not negligible in the calculation of the statistic).
+  + An exponential decay: $W_{i,j} = e^{-k.D(i,j)}$
+  + A threshold function: $W_{i,j} = 1$ if $D(i,j) \le k$ and $W_{i,j} = 0$ if $D(i,j) > k$
+  + A "Closest neighbor" process where $k$ is the number of closest neighbor that are considered. $W_{i,j} = 1$ if $D(i,j) \le D(i,j_k)$ and $W_{i,j} = 0$ if $D(i,j) > D(i,j_k)$, where $j_k$ is the k-th closest neighbor of $i$.
+
+Therefore, the more distant $i$ and $j$ are, the smaller $W_{i,j}$ (modulated by $k$), and the less the couple $(i,j)$ will be considered for the calculation of the Moran's I statistic.
+
+Using one of the possible functions $g$, we compute the Moran's I for a range of values for $k$. Each time, we use package `ape` to test whether the "observed" value of Moran's I is different than its expected value under the hypothesis of no spatial autocorrelation. We plot the p-value of this test depending on the value of $k$.
+
+We also plot a map with the PoI for each observation. (It's possible to shift the dots to plot both observations of a same farm side by side.)
+
+In green is the value of the weight $W$ around each farm, with a given value of $k$. The more transparent, the lower the weight $W$, and therefore the less farms at this distance are taken into account into the calculation of the Moran's I statistic.
+
+It is possible to plot the green area around one farm only (as an example).
+
+Function to compute the Moran's I statistic:
 
 ```{r}
+dist_geo = spDists(x = as.matrix(x = prob_intro_farms[,c("Long", "Lat")]), longlat = T)
 
 coef_moran = function(k, decay_fun){
-  dist_geo = spDists(x = as.matrix(x = prob_intro_farms[,c("Long", "Lat")]), longlat = T)
   
   if(decay_fun == "exp"){
     weight_matrix = exp(-k * dist_geo)
+  }else if(decay_fun == "linear"){
+    weight_matrix = apply(X = dist_geo, MARGIN = c(1,2), FUN = function(x) max(0, 1-(x/k)))
+  }else if(decay_fun == "next_neighbor"){
+    weight_matrix = dist_geo
+    for(i in 1:nrow(weight_matrix)){
+      weight_matrix[i,] = 0
+      distance_k_closest_neighbor = sort(dist_geo[i,], partial=k)[k]
+      weight_matrix[i, which(dist_geo[i,] <= distance_k_closest_neighbor)] = 1
+    }
   }else if(decay_fun == "thresh"){
     weight_matrix = (dist_geo <= k)
   }
   diag(weight_matrix) = 0
   
-  res = Moran.I(x = prob_intro_farms$Prob, weight = weight_matrix)
+  res = Moran.I(x = prob_intro_farms$Prob, weight = weight_matrix, alternative = "greater")
   
-  list(p_val = res$p.value, max_dist = max(dist_geo[weight_matrix > 0.05]))
-}
-
-val_exp = seq(0,10,0.01)[-1]
-
-plot(x = val_exp, y = sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",], type="l", main = "p-value (there is spatial correlation if p<0.05)", xlab = "k", ylab = "p-value") + lines(x = c(0, 100000), y = c(0.05, 0.05), col = "red")
-
-plot(x = val_exp, y = sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["max_dist",], type="l", main = "Maximum distance such that W(i,j) > 0.05", xlab = "k", ylab = "Distance (km)") + lines(x = rep(min(val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05]), 2), y = c(-10, 1000), col = "red") + lines(x = rep(max(val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05]), 2), y = c(-10, 1000), col = "red")
-
-k_val_with_spatial_autocorr = val_exp[as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]) < 0.05]
-if(length(k_val_with_spatial_autocorr) > 0){
-  print("The values of k for which there is spatial autocorrelation (p-value < 0.05) are:")
-  print(k_val_with_spatial_autocorr)
-}else{
-  print("There is no value of k for which there is spatial autocorrelation (p-value < 0.05).")
+  c(obs = res$observed, expect = res$expected, sd = res$sd, p_val = res$p.value)
 }
 
 ```
 
-In case we found values of k for which there is spatial autocorrelation (p-value < 0.05), we plot a map with the probability of introduction for each observation. (It's possible to shift the dots to plot both observations of a farm side by side.)
+Function to plot the figures described above:
 
-We first load the data on commune borders in the districts of ViParc study:
+```{r}
+res_exp = sapply(X = seq(0,24,0.1)[-1], FUN = coef_moran, decay_fun = "exp")
+res_thresh = sapply(X = seq(0,24,0.1)[-1], FUN = coef_moran, decay_fun = "thresh")
+res_linear = sapply(X = seq(0,24,0.1)[-1], FUN = coef_moran, decay_fun = "linear")
+res_next_neighbor = sapply(X = seq(0,24,1)[-1], FUN = coef_moran, decay_fun = "next_neighbor")
 
-```{r, label="Load commune borders data"}
-if(length(k_val_with_spatial_autocorr) > 0){
-  sf_file = readOGR("C:/Users/Jonathan/Desktop/Programmes/amr_vietnam/Shapefiles/VN National Commune_new.shp")
-  sf_file_df = fortify(sf_file[sf_file$D_CODE %in% c(866, 872, 873),])
-}else{
-  print("There is no value of k for which there is spatial autocorrelation (p-value < 0.05).")
-}
-
-```
-
-In green is the value of the weight $W$ around each farm, with $k$ taken such that the p-value is minimum. The more transparent, the lower the weight $W$, and therefore the less farms at this distance are taken into account into the calculation of the Moran's I statistic.
-
-If we want to plot the green area around one farm only (as an example), we set `plot_only_one_area = T`.
-
-```{r, fig.width=8, fig.height=5}
-if(length(k_val_with_spatial_autocorr) > 0){
-  plot_only_one_area = F
-  coef_exp_dec = val_exp[which.min(as.numeric(sapply(X = val_exp, FUN = coef_moran, decay_fun = "exp")["p_val",]))]
+spatial_moran = function(decay_param, decay_fct = "exp", pval = 0.05, plot_only_one_area = T){
   
-  if(plot_only_one_area == T){
-    
-    ref_point = 21
-    heat_map_lat = seq(prob_intro_farms$Lat[ref_point]-0.1, prob_intro_farms$Lat[ref_point]+0.1, 0.001)
-    heat_map_long = seq(prob_intro_farms$Long[ref_point]-0.1, prob_intro_farms$Long[ref_point]+0.1, 0.001)
-    heat_map_grid = expand.grid(heat_map_long, heat_map_lat)
-    colnames(heat_map_grid) = c("Long", "Lat")
-    
-    heat_map_grid$dist_ref = spDistsN1(pts = as.matrix(heat_map_grid), pt = as.numeric(prob_intro_farms[ref_point, c("Long", "Lat")]), longlat = T)
-    heat_map_grid$exp_dec = exp(-coef_exp_dec * heat_map_grid$dist_ref)
-    
-  }else{
-    
-    heat_map_lat = seq(min(prob_intro_farms$Lat)-0.05, max(prob_intro_farms$Lat)+0.05, 0.001)
-    heat_map_long = seq(min(prob_intro_farms$Long)-0.05, max(prob_intro_farms$Long)+0.05, 0.001)
-    heat_map_grid = expand.grid(heat_map_long, heat_map_lat)
-    colnames(heat_map_grid) = c("Long", "Lat")
-    heat_map_grid$exp_dec = 0
-    
-    for(ref_point in 1:nrow(prob_intro_farms)){
-      dist_this_ref = spDistsN1(pts = as.matrix(heat_map_grid[,c("Long", "Lat")]), pt = as.numeric(prob_intro_farms[ref_point, c("Long", "Lat")]), longlat = T)
-      exp_dec_this_ref = exp(-coef_exp_dec * dist_this_ref)
-      
-      heat_map_grid$exp_dec = pmax(heat_map_grid$exp_dec, exp_dec_this_ref)
-    }
+  pval = as.numeric(pval)
+  pval_this_param = coef_moran(k = decay_param, decay_fun = decay_fct)["p_val"]
   
+  if(decay_fct == "exp"){
+    val_exp = seq(0,24,0.1)[-1]
+    res_ref = res_exp
+  }else if(decay_fct == "thresh"){
+    val_exp = seq(0,24,0.1)[-1]
+    res_ref = res_thresh
+  }else if(decay_fct == "linear"){
+    val_exp = seq(0,24,0.1)[-1]
+    res_ref = res_linear
+  }else if(decay_fct == "next_neighbor"){
+    val_exp = seq(0,24,1)[-1]
+    res_ref = res_next_neighbor
   }
   
-  p = ggplot()
-  p = p + ggtitle("Probability of introduction in farms and area of significant spatial autocorrelation around them")
-  p = p + xlab("Longitude") + ylab("Latitude")
+  if(any(res_ref["p_val",] < pval)){
+    printed_text = paste0("Using this function for the weight matrix in the calculation of Moran's I, some values of the decay parameter make the test of spatial autocorrelation significant (p<", pval, "). For this specific value of the parameter, the p-value is: ", round(pval_this_param, 3), ".")
+  }else{
+    printed_text = paste0("Using this function for the weight matrix in the calculation of Moran's I, no value of the decay parameter make the test of spatial autocorrelation significant (p>", pval, "). For this specific value of the parameter, the p-value is: ", round(pval_this_param, 3), ".")
+  }
   
-  p = p  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
+  p1 = ggplot()
+  p1 = p1 + ggtitle("p-value of Moran's I test")
+  p1 = p1 + xlab("Decay parameter") + ylab("p-value")
+  p1 = p1 + geom_line(aes(x = val_exp, y = res_ref["p_val",]))
+  p1 = p1 + geom_line(aes(x = c(0, max(val_exp)), y = c(pval, pval)), col = "red", linetype = "dashed")
+  p1 = p1 + geom_line(aes(x = c(decay_param, decay_param), y = c(0, max(res_ref["p_val",]))), col = "dodgerblue2", size = 1)
+
+  heat_map_lat = seq(min(prob_intro_farms$Lat)-0.035, max(prob_intro_farms$Lat)+0.035, 0.005)
+  heat_map_long = seq(min(prob_intro_farms$Long)-0.035, max(prob_intro_farms$Long)+0.035, 0.005)
+  heat_map_grid = expand.grid(heat_map_long, heat_map_lat)
+  colnames(heat_map_grid) = c("Long", "Lat")
+  heat_map_grid$decay = 0
   
-  p = p + geom_tile(data = heat_map_grid, aes(x = Long, y = Lat, alpha = exp_dec), fill = "forestgreen")
-  p = p + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
-  p = p + geom_point(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 2)
+  if(decay_fct != "next_neighbor"){
+    if(plot_only_one_area == T){
+      ref_point = 21
+      dist_this_ref = spDistsN1(pts = as.matrix(heat_map_grid[,c("Long", "Lat")]), pt = as.numeric(prob_intro_farms[ref_point, c("Long", "Lat")]), longlat = T)
+      
+      if(decay_fct == "exp"){
+        heat_map_grid$decay = exp(-decay_param * dist_this_ref)
+      }else if(decay_fct == "thresh"){
+        heat_map_grid$decay = as.numeric(dist_this_ref <= decay_param)
+      }else if(decay_fct == "linear"){
+        heat_map_grid$decay = -decay_param*dist_this_ref
+        heat_map_grid$decay = pmax(0, 1-(dist_this_ref/decay_param))
+      }
+    }else{
+      for(ref_point in 1:nrow(prob_intro_farms)){
+        dist_this_ref = spDistsN1(pts = as.matrix(heat_map_grid[,c("Long", "Lat")]), pt = as.numeric(prob_intro_farms[ref_point, c("Long", "Lat")]), longlat = T)
+        
+        if(decay_fct == "exp"){
+          dec_this_ref = exp(-decay_param * dist_this_ref)
+        }else if(decay_fct == "thresh"){
+          dec_this_ref = as.numeric(dist_this_ref <= decay_param)
+        }else if(decay_fct == "linear"){
+          dec_this_ref = pmax(0, 1-(dist_this_ref/decay_param))
+        }
+        heat_map_grid$decay = pmax(heat_map_grid$decay, dec_this_ref)
+      }
+    }
+  }
+
+  p2 = ggplot()
+  p2 = p2 + ggtitle("Probability of introduction in farms and area around them considered for the calculation of Moran's I")
+  p2 = p2 + xlab("Longitude") + ylab("Latitude")
+  
+  p2 = p2  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
+  
+  if(decay_fct != "next_neighbor"){
+    p2 = p2 + geom_tile(data = heat_map_grid, aes(x = Long, y = Lat, alpha = decay), fill = "forestgreen")
+  }
+  p2 = p2 + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
+  p2 = p2 + geom_point(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 2)
   # p = p + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 2, width = 0.003, height = 0.003)
   
-  p = p + scale_fill_gradient2(name = "Probability of introduction:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
-  p = p + scale_alpha_continuous(name = "Value in the weight matrix:", range = c(0,1))
-  p = p + ggsn::scalebar(dist = 5, location = "topright", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
-  p = p + blank()
-  p
-  
-  rm(heat_map_lat, heat_map_long, dist_this_ref, exp_dec_this_ref, ref_point)
-}else{
-  print("There is no value of k for which there is spatial autocorrelation (p-value < 0.05).")
+  p2 = p2 + scale_fill_gradient2(name = "Probability of introduction:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
+  p2 = p2 + scale_alpha_continuous(name = "Value in the weight matrix:", range = c(0,1))
+  p2 = p2 + ggsn::scalebar(dist = 5, location = "topright", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
+  p2 = p2 + blank()
+
+  list(printed_text = printed_text, p1 = p1, p2 = p2)
 }
 
 ```
 
+Shiny app for visualization:
 
+```{r}
+ui <- fluidPage(titlePanel("Spatial analysis with Moran's I"),{
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("decay_param",
+                  "Decay parameter:",
+                  min = 0.1,
+                  max = 24,
+                  value=1),
+      radioButtons("decay_fct",
+                  "Decay function:",
+                  choices = list("Exponential" = "exp", "Threshold" = "thresh", "Next neighbor" = "next_neighbor", "Linear" = "linear"),
+                  selected = "exp"),
+      radioButtons("pval",
+                  "p-value of the test:",
+                  choices = list("0.01" = 0.01, "0.05" = 0.05, "0.1" = 0.1),
+                  selected = 0.05),
+      radioButtons("plot_only_one_area",
+                  "Do we plot the area around one point only ?",
+                  choices = list("Yes" = T, "No" = F),
+                  selected = T)
+    ),
+    
+    mainPanel(
+      textOutput("textdisp"),
+      plotOutput("plotdisp1"),
+      plotOutput("plotdisp2")
+    )
+  )
+})
+
+server <- function(input, output){
+
+  output$textdisp <- renderText(
+    spatial_moran(decay_param = input$decay_param, decay_fct = input$decay_fct, pval = input$pval, plot_only_one_area = input$plot_only_one_area)[["printed_text"]]
+  )
+  output$plotdisp1 <- renderPlot({
+    spatial_moran(decay_param = input$decay_param, decay_fct = input$decay_fct, pval = input$pval, plot_only_one_area = input$plot_only_one_area)[["p1"]]
+  })
+  output$plotdisp2 <- renderPlot({
+    spatial_moran(decay_param = input$decay_param, decay_fct = input$decay_fct, pval = input$pval, plot_only_one_area = input$plot_only_one_area)[["p2"]]
+  })
+}
+
+shinyApp(ui=ui, server=server)
+
+```
+
+#### Detecting geographic areas with a higher or lower probability of introduction
+
+In the previous section, we assessed globally the spatial autocorrelation of the PoI. Here, we investigate the existence of geographic areas of high or low PoI.
+
+We separate the data points ("observations") into clusters, only determined by their geographic location (euclidian distance). There are 1 or 2 (even 3) probabilities of introduction in each location-farm: in this case, the distance between them is 0. We perform a hierarchical clustering using the Ward algorithm. We obtain a dendrogram in which each leaf is a PoI.
+
+From this process, we have the possibility to divide the data into a range of numbers of clusters $N_{clust}$: from 2 to the number of "observations".
+
+For each value of $N_{clust}$, and for each of these $N_{clust}$ clusters, we test the null hypothesis that it is equally likely that a value of PoI randomly selected from this cluster will be less than or greater than a value of PoI randomly selected from outside the cluster. 
+
+Regarding the potentially small number of observations in a cluster, we perform a non-parametric Wilcoxon-Mann-Whitney test.
+
+In the following Shiny app, depending on the value of $N_{clust}$, we display on both the dendrogram and on the map, the clusters for which the p-value of the test is below the value we set for this test.
+
+Function performing the test and plotting the figures:
+
+```{r}
+spatial_clusters = function(nb_clust, which_signif_clust = 1, adapted_to_shiny = F, p_val = 0.05){
+  dist.geo <- as.dist(dist_geo)
+  farms.hc = hclust(dist.geo, method = "ward.D2") # Compute hierachical clustering
+  
+  analysis = prob_intro_farms
+  analysis$group = as.factor(cutree(farms.hc, k = nb_clust))
+  signif_clust = c()
+  numb_indiv_in_clust = c()
+  
+  for(clust_i in 1:nb_clust){
+    analysis$in_group = (analysis$group == clust_i)
+    res_test = wilcox.test(x = analysis$Prob[analysis$in_group], y = analysis$Prob[! analysis$in_group]) 
+    if(res_test$p.value < p_val){
+      signif_clust = c(signif_clust, clust_i)
+      numb_indiv_in_clust = c(numb_indiv_in_clust, sum(analysis$in_group))
+    }
+  }
+  
+  if(length(signif_clust) == 0){
+    analysis$in_group = F
+    text_to_print = paste0("When data points are divided in ", nb_clust, " spatial clusters, no cluster has a mean value of introductions statistically different from the mean of all other clusters (p>", p_val, ", Wilcoxon test).")
+  }else{
+    analysis$in_group = (analysis$group == signif_clust[min(as.numeric(which_signif_clust), length(signif_clust))])
+    text_to_print = paste0("When data points are divided in ", nb_clust, " spatial clusters, ", length(signif_clust), " clusters have a mean value of introductions statistically different from the mean of all other clusters (p<", p_val, ", Wilcoxon test). The number of data points included in each of these clusters (in green below) is respectively: ", paste(numb_indiv_in_clust, collapse = ", "), ".")
+  }
+  if(! adapted_to_shiny){print(text_to_print)}
+
+  p1 = ggplot()
+  p1 = p1 + ggtitle("Probability of introduction in farms:")
+  p1 = p1 + xlab("Longitude") + ylab("Latitude")
+  p1 = p1  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
+  p1 = p1 + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
+  if(length(signif_clust) != 0){
+    p1 = p1 + geom_circle(data = analysis[analysis$in_group,], aes(x0 = (max(Long)+min(Long))/2, y0 = (max(Lat)+min(Lat))/2, r = 0.005 + max((max(Long)-min(Long))/2, (max(Lat)-min(Lat))/2)), col = "green", size = 1)
+  }
+  p1 = p1 + geom_jitter(data = analysis, aes(x = Long, y = Lat, fill = Prob, shape = in_group), col = "black", size = 3, width = 0.003, height = 0.003)
+  # p1 = p1 + geom_point(data = analysis, aes(x = Long, y = Lat, fill = Prob, shape = in_group), col = "black", size = 3)
+  p1 = p1 + scale_fill_gradient2(name = "Probability of introduction:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
+  p1 = p1 + scale_shape_manual(name = "In cluster:", values = c(21, 24))
+  p1 = p1 + ggsn::scalebar(dist = 5, location = "topright", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
+  p1 = p1 + blank() #+ coord_fixed()
+  if(! adapted_to_shiny){plot(p1)}
+
+  farms.hc = as.dendrogram(farms.hc)
+  p2 <- dendrapply(farms.hc, function(n){
+    if(is.leaf(n)){
+      row_in_data = attributes(n)$label
+      leaf_color = ifelse(analysis$Prob[row_in_data] > 0.95, "red", ifelse(analysis$Prob[row_in_data] < 0.05, "blue", "grey"))
+      label_color = ifelse(analysis$in_group[row_in_data], "green", "black")
+      attr(n, "nodePar") <- list(pch=20, lab.cex = 1, cex = 1.5, lab.col = label_color, col = leaf_color)
+    }
+    n
+  })
+  
+  plot(p2, main = "Spatial clustering")
+  abline(h = heights_per_k.dendrogram(farms.hc)[nb_clust], col = "darkviolet", lty = "dotted", lwd = 2)
+  
+  if(adapted_to_shiny){list(text = text_to_print, map = p1, dendogram = p2)}
+}
+
+```
+
+Shiny app for visualization:
+
+```{r}
+ui <- fluidPage(titlePanel("Spatial analysis by clustering"),{
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("nb_clust",
+                  "Number of spatial clusters:",
+                  min = 2,
+                  max = 23,
+                  value = 11),
+      selectInput("which_signif_clust",
+                  "Significant cluster to display:",
+                  choices = list("Cluster n°1" = 1, "Cluster n°2" = 2, "Cluster n°3" = 3, "Cluster n°4" = 4, "Cluster n°5" = 5),
+                  selected = 1),
+      radioButtons("p_val",
+                  "p-value in Wilcoxon test:",
+                  choices = list("0.01" = 0.01, "0.05" = 0.05, "0.1" = 0.1),
+                  selected = 0.05)
+    ),
+    
+    mainPanel(
+      textOutput("textdisp"),
+      plotOutput("plotdisp1"),
+      plotOutput("plotdisp2")
+    )
+  )
+})
+
+server <- function(input, output){
+
+  output$textdisp <- renderText(
+    spatial_clusters(nb_clust = input$nb_clust, which_signif_clust = input$which_signif_clust, p_val = input$p_val, adapted_to_shiny = T)[["text"]]
+  )
+  output$plotdisp1 <- renderPlot({
+    spatial_clusters(nb_clust = input$nb_clust, which_signif_clust = input$which_signif_clust, p_val = input$p_val, adapted_to_shiny = T)[["dendogram"]]
+  })
+  output$plotdisp2 <- renderPlot({
+    spatial_clusters(nb_clust = input$nb_clust, which_signif_clust = input$which_signif_clust, p_val = input$p_val, adapted_to_shiny = T)[["map"]]
+  })
+}
+
+shinyApp(ui=ui, server=server)
+
+```
 
