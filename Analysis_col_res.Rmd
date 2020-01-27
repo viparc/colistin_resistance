@@ -1618,7 +1618,7 @@ sf_file_df = fortify(sf_file[sf_file$D_CODE %in% c(866, 872, 873),])
 
 ```
 
-#### Assessing the spatial autocorrelation of the probability of introduction
+#### Assessing the global spatial autocorrelation of the probability of introduction
 
 We compute the Moran's I statistic, defined as:
 
@@ -1827,6 +1827,144 @@ server <- function(input, output){
   })
   output$plotdisp2 <- renderPlot({
     spatial_moran(decay_param = input$decay_param, decay_fct = input$decay_fct, pval = input$pval, plot_only_one_area = input$plot_only_one_area)[["p2"]]
+  })
+}
+
+shinyApp(ui=ui, server=server)
+
+```
+
+#### Local Moran's I
+
+```{r}
+library(spdep)
+
+# prob_intro_farms = stats::aggregate(prob_intro_farms, by = list(prob_intro_farms$Farm), FUN = mean)
+# prob_intro_farms$Farm = prob_intro_farms$Group.1
+
+dist_geo = spDists(x = as.matrix(x = prob_intro_farms[,c("Long", "Lat")]), longlat = T) # Must stay outside the function "local_moran"
+
+local_moran = function(decay_param, decay_fun, p_val, style_weight){
+  
+  set.ZeroPolicyOption(TRUE)
+  prob_intro_farms$Lat = prob_intro_farms$Lat + runif(length(prob_intro_farms$Lat), 0, 0.00001)
+  prob_intro_farms$scaled_prob = as.numeric(scale(prob_intro_farms$Prob))
+  
+  if(decay_fun == "exp"){
+    
+    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[,c("Long","Lat")]), d1 = 0, d2 = 1000, longlat = T)
+    weight_matrix = exp(-decay_param * dist_geo)
+    list_weight_matrix = split(weight_matrix, rep(1:ncol(weight_matrix), each = 1))
+    for(i in 1:length(list_weight_matrix)){list_weight_matrix[[i]] = list_weight_matrix[[i]][-i]}
+    listw_for_test = nb2listw(neighbors, glist = list_weight_matrix, style = style_weight)
+    
+  }else if(decay_fun == "power"){
+    
+    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[,c("Long","Lat")]), d1 = 0, d2 = 1000, longlat = T)
+    weight_matrix = 1/(1+(dist_geo)^decay_param)
+    list_weight_matrix = split(weight_matrix, rep(1:ncol(weight_matrix), each = 1))
+    for(i in 1:length(list_weight_matrix)){list_weight_matrix[[i]] = list_weight_matrix[[i]][-i]}
+    listw_for_test = nb2listw(neighbors, glist = list_weight_matrix, style = style_weight)
+
+  }else if(decay_fun == "linear"){
+    
+    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[,c("Long","Lat")]), d1 = 0, d2 = 1000, longlat = T)
+    weight_matrix = apply(X = dist_geo, MARGIN = c(1,2), FUN = function(x) max(0, 1-(x/decay_param)))
+    list_weight_matrix = split(weight_matrix, rep(1:ncol(weight_matrix), each = 1))
+    for(i in 1:length(list_weight_matrix)){list_weight_matrix[[i]] = list_weight_matrix[[i]][-i]}
+    listw_for_test = nb2listw(neighbors, glist = list_weight_matrix, style = style_weight)
+
+  }else if(decay_fun == "next_neighbor"){
+    
+    neighbors = knn2nb(knearneigh(x = as.matrix(prob_intro_farms[,c("Long","Lat")]), k = decay_param, longlat = T))
+    listw_for_test = nb2listw(neighbors, style = style_weight)
+    
+  }else if(decay_fun == "thresh"){
+    
+    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[,c("Long","Lat")]), d1 = 0, d2 = decay_param, longlat = T)
+    listw_for_test = nb2listw(neighbors, style = style_weight)
+  }
+
+  p.val.moran = moran.test(x = prob_intro_farms$scaled_prob, listw = listw_for_test)$p.value
+  res.local.moran = localmoran(x = prob_intro_farms$scaled_prob, listw = listw_for_test)
+  prob_intro_farms$lag = lag.listw(listw_for_test, prob_intro_farms$scaled_prob)
+  prob_intro_farms$pval = res.local.moran[,5]
+  
+  prob_intro_farms$pval[prob_intro_farms$pval >= p_val] = "N.S."
+  prob_intro_farms$pval[prob_intro_farms$pval < p_val] = "Significant"
+  
+  prob_intro_farms$cluster[which((prob_intro_farms$scaled_prob < 0) & (prob_intro_farms$lag < 0))] = "Low-low"
+  prob_intro_farms$cluster[which((prob_intro_farms$scaled_prob >= 0) & (prob_intro_farms$lag < 0))] = "High-low"
+  prob_intro_farms$cluster[which((prob_intro_farms$scaled_prob < 0) & (prob_intro_farms$lag >= 0))] = "Low-high"
+  prob_intro_farms$cluster[which((prob_intro_farms$scaled_prob >= 0) & (prob_intro_farms$lag >= 0))] = "High-high"
+  prob_intro_farms$cluster[prob_intro_farms$pval == "N.S."] = "N.S."
+  
+  
+  p1 = ggplot()
+  p1 = p1 + ggtitle("Local Moran's I")
+  p1 = p1 + xlab("Longitude") + ylab("Latitude")
+  p1 = p1  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
+  p1 = p1 + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
+  p1 = p1 + geom_point(data = prob_intro_farms, aes(x = Long, y = Lat, fill = cluster), col = "black", shape = 21, size = 4)
+  p1 = p1 + ggsn::scalebar(dist = 5, location = "topright", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
+  p1 = p1 + blank()
+  p1 = p1 + scale_fill_manual("Cluster:", values = c("High-high"="red", "Low-low"="blue", "High-low"="lightpink", "Low-high"="skyblue2", "N.S."="white"))
+
+  p2 = ggplot(data = prob_intro_farms, aes(x = scaled_prob, y = lag, fill = cluster))
+  p2 = p2 + geom_jitter(col = "black", shape = 21, size = 4, width = 0.05, height = 0.05)
+  p2 = p2 + geom_vline(xintercept = 0) + geom_hline(yintercept = 0)
+  # p2 = p2 + geom_smooth(method = 'lm', formula = y~x, col = "red", linetype = "dashed")
+  p2 = p2 + xlab("Scaled probability of introduction") + ylab("Spatial lag")
+  p2 = p2 + scale_fill_manual("Cluster:", values = c("High-high"="red", "Low-low"="blue", "High-low"="lightpink", "Low-high"="skyblue2", "N.S."="white"))
+
+  list(p.val.moran=p.val.moran, p1=p1, p2=p2)
+}
+
+```
+
+Shiny app for visualization:
+
+```{r}
+ui <- fluidPage(titlePanel("Local Moran's I"),{
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("decay_param",
+                  "Decay parameter:",
+                  min = 0.1,
+                  max = 24,
+                  value=1),
+      radioButtons("decay_fun",
+                  "Decay function:",
+                  choices = list("Exponential" = "exp", "Power" = "power", "Threshold" = "thresh", "Next neighbor" = "next_neighbor", "Linear" = "linear"),
+                  selected = "exp"),
+      radioButtons("p_val",
+                  "p-value of the test:",
+                  choices = list("0.01" = 0.01, "0.05" = 0.05, "0.1" = 0.1),
+                  selected = 0.05),
+      radioButtons("style_weight",
+                  "Style of weight:",
+                  choices = list("Basic binary" = "B", "Row standardised" = "W", "Globally standardised" = "C", "Globally standardised divided by number of neighbours" = "U"),
+                  selected = "B")
+    ),
+    
+    mainPanel(
+      textOutput("textdisp"),
+      plotOutput("plotdisp1"),
+      plotOutput("plotdisp2")
+    )
+  )
+})
+
+server <- function(input, output){
+
+  output$textdisp <- renderText(
+    local_moran(decay_param = input$decay_param, decay_fun = input$decay_fun, p_val = input$p_val, style_weight = input$style_weight)[["p.val.moran"]]
+  )
+  output$plotdisp1 <- renderPlot({
+    local_moran(decay_param = input$decay_param, decay_fun = input$decay_fun, p_val = input$p_val, style_weight = input$style_weight)[["p1"]]
+  })
+  output$plotdisp2 <- renderPlot({
+    local_moran(decay_param = input$decay_param, decay_fun = input$decay_fun, p_val = input$p_val, style_weight = input$style_weight)[["p2"]]
   })
 }
 
