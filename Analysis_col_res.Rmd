@@ -1252,7 +1252,7 @@ if(test_method_comp){
   res_data = test_scenario_3[[1]]
 }else{
   beta_fake = 8
-  alpha_fake = 0.4
+  alpha_fake = 0.55
   
   res_data = res_data_saved
   fake_res = run2(aim="pred", intr=0, mu=logit(0.05), lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]$predmod
@@ -1331,15 +1331,15 @@ if(test_method_comp){
   res_data = test_scenario_4[[1]]
 }else{
   beta_fake = 8
-  alpha_fake = 0.4
+  alpha_fake = 0.55
   
   res_data = res_data_saved
   fake_res = run2(aim="pred", intr=0, mu=logit(0.05), lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]$predmod
   rm(res_data)
-  fake_res = fake_res + base::sample(x = c(0,0.5), size = length(fake_res), replace = T, prob = c(0.7,0.3)) + rnorm(length(fake_res), 0, 0.05)
+  fake_res = fake_res + rnorm(length(fake_res), 0, 0.05)
   
-  introd_fake = sample(x = which(fake_res < 0.4), size = round(0.3*sum(fake_res < 0.4)))
-  fake_res[introd_fake] = fake_res[introd_fake] + 0.6
+  introd_fake = sample(x = which(fake_res < 0.25), size = round(0.3*sum(fake_res < 0.25)))
+  fake_res[introd_fake] = rnorm(length(introd_fake), 0.6, 0.05)
 
   na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
   if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
@@ -1655,6 +1655,8 @@ coef_moran = function(k, decay_fun){
   
   if(decay_fun == "exp"){
     weight_matrix = exp(-k * dist_geo)
+  }else if(decay_fun == "power"){
+    weight_matrix = 1/(1+(dist_geo)^k)
   }else if(decay_fun == "linear"){
     weight_matrix = apply(X = dist_geo, MARGIN = c(1,2), FUN = function(x) max(0, 1-(x/k)))
   }else if(decay_fun == "next_neighbor"){
@@ -1670,7 +1672,7 @@ coef_moran = function(k, decay_fun){
   diag(weight_matrix) = 0
   
   res = Moran.I(x = prob_intro_farms$Prob, weight = weight_matrix, alternative = "greater")
-  
+
   c(obs = res$observed, expect = res$expected, sd = res$sd, p_val = res$p.value)
 }
 
@@ -1680,6 +1682,7 @@ Function to plot the figures described above:
 
 ```{r}
 res_exp = sapply(X = seq(0,24,0.1)[-1], FUN = coef_moran, decay_fun = "exp")
+res_power = sapply(X = seq(0,24,0.1)[-1], FUN = coef_moran, decay_fun = "power")
 res_thresh = sapply(X = seq(0,24,0.1)[-1], FUN = coef_moran, decay_fun = "thresh")
 res_linear = sapply(X = seq(0,24,0.1)[-1], FUN = coef_moran, decay_fun = "linear")
 res_next_neighbor = sapply(X = seq(0,24,1)[-1], FUN = coef_moran, decay_fun = "next_neighbor")
@@ -1692,6 +1695,9 @@ spatial_moran = function(decay_param, decay_fct = "exp", pval = 0.05, plot_only_
   if(decay_fct == "exp"){
     val_exp = seq(0,24,0.1)[-1]
     res_ref = res_exp
+  }else if(decay_fct == "power"){
+    val_exp = seq(0,24,0.1)[-1]
+    res_ref = res_power
   }else if(decay_fct == "thresh"){
     val_exp = seq(0,24,0.1)[-1]
     res_ref = res_thresh
@@ -1729,6 +1735,8 @@ spatial_moran = function(decay_param, decay_fct = "exp", pval = 0.05, plot_only_
       
       if(decay_fct == "exp"){
         heat_map_grid$decay = exp(-decay_param * dist_this_ref)
+      }else if(decay_fct == "power"){
+        heat_map_grid$decay = 1/(1+dist_this_ref^decay_param)
       }else if(decay_fct == "thresh"){
         heat_map_grid$decay = as.numeric(dist_this_ref <= decay_param)
       }else if(decay_fct == "linear"){
@@ -1741,6 +1749,8 @@ spatial_moran = function(decay_param, decay_fct = "exp", pval = 0.05, plot_only_
         
         if(decay_fct == "exp"){
           dec_this_ref = exp(-decay_param * dist_this_ref)
+        }else if(decay_fct == "power"){
+          dec_this_ref = 1/(1+dist_this_ref^decay_param)
         }else if(decay_fct == "thresh"){
           dec_this_ref = as.numeric(dist_this_ref <= decay_param)
         }else if(decay_fct == "linear"){
@@ -1787,7 +1797,7 @@ ui <- fluidPage(titlePanel("Spatial analysis with Moran's I"),{
                   value=1),
       radioButtons("decay_fct",
                   "Decay function:",
-                  choices = list("Exponential" = "exp", "Threshold" = "thresh", "Next neighbor" = "next_neighbor", "Linear" = "linear"),
+                  choices = list("Exponential" = "exp", "Power" = "power", "Threshold" = "thresh", "Next neighbor" = "next_neighbor", "Linear" = "linear"),
                   selected = "exp"),
       radioButtons("pval",
                   "p-value of the test:",
