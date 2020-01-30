@@ -97,6 +97,7 @@ ratio_auc = F
 run_shiny = F
 definition_amu = "col"
 amu_model_is_quanti = F
+type_mod = "linear" # "log_beta"
 alread_comp = T
 test_method_comp = T
 
@@ -763,17 +764,23 @@ Observations for which the resistance measure (model outcome) is absent are dele
 We also define `run2_intr` which is a wraper: its output is the function `run2` with the value of `intr` (input of `run2`) specified.
 
 ```{r}
-run2 = function(aim="est", intr=introd, type_mod="linear", mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd){
+run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd){
 
-  mu = sigmoid(mu)
-  lambda1 = lambda1
-  lambda2 = lambda2
-  alpha = alpha
   beta = 10 * sigmoid(beta) +1
-  teta = teta
-  delta = 5 * sigmoid(delta) +1
-  eta = sigmoid(eta)
-  Sd = 3 * sigmoid(Sd)
+  delta = 10 * sigmoid(delta) +1
+  
+  if(type_mod == "linear"){
+    mu = sigmoid(mu)
+    lambda1 = lambda1
+    lambda2 = lambda2
+    alpha = alpha
+    teta = teta
+    eta = sigmoid(eta)
+    Sd = 3 * sigmoid(Sd)
+  }else if(type_mod == "log_beta"){
+    eta = exp(eta)
+    Sd = exp(Sd)
+  }
 
   obsdat = resamu(nwkseff=beta, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", thresh_res=0.4, ignore.nul=F, lag_amu_init=delta, obj="est", expo=definition_amu)
   obsdat = obsdat[! is.na(obsdat$obsres),]
@@ -801,10 +808,13 @@ run2 = function(aim="est", intr=introd, type_mod="linear", mu, lambda1, lambda2,
       
     }else if (aim == "pred"){
       
-      return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod", "cycle")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
+      obsdat$predmod_inf = qnorm(p = 0.025, mean=obsdat$predmod, sd=Sd)
+      obsdat$predmod_sup = qnorm(p = 0.975, mean=obsdat$predmod, sd=Sd)
+      
+      return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod", "cycle", "predmod_inf", "predmod_sup")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
     }
   
-  }else if(type_mod == "glm_bin"){
+  }else if(type_mod == "log_beta"){
     
     obsdat$glm_predmod_intro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta
     obsdat$glm_predmod_intro = pracma::sigmoid(obsdat$glm_predmod_intro)
@@ -814,7 +824,8 @@ run2 = function(aim="est", intr=introd, type_mod="linear", mu, lambda1, lambda2,
     
     obsdat$predmod = obsdat$introduc * obsdat$glm_predmod_intro + (1-obsdat$introduc) * obsdat$glm_predmod_nointro
     
-    total_loglik = (obsdat$predmod^obsdat$obsres)*((1-obsdat$predmod)^(1-obsdat$obsres))
+    # total_loglik = (obsdat$predmod^obsdat$obsres)*((1-obsdat$predmod)^(1-obsdat$obsres))
+    total_loglik = dbeta(x=obsdat$obsres, shape1=Sd, shape2=Sd*(1.00001-obsdat$predmod)/(obsdat$predmod+0.00001), log=T)
     total_loglik[is.infinite(total_loglik)] = -710
 
     if(aim == "est"){
@@ -822,16 +833,19 @@ run2 = function(aim="est", intr=introd, type_mod="linear", mu, lambda1, lambda2,
       return(-sum(total_loglik))
       
     }else if (aim == "pred"){
+      
+      obsdat$predmod_inf = qbeta(p = 0.025, shape1 = Sd, shape2 = Sd*(1.00001-obsdat$predmod)/(obsdat$predmod+0.00001))
+      obsdat$predmod_sup = qbeta(p = 0.975, shape1 = Sd, shape2 = Sd*(1.00001-obsdat$predmod)/(obsdat$predmod+0.00001))
 
-      return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod", "cycle")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
+      return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod", "cycle", "predmod_inf", "predmod_sup")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
     }
   }
 }
 
 # Factory/Wrapper function (returns a function with one of the parameters ("intr") fixed)
 run2_intr <- function(x) {
- function(aim="est", type_mod="linear", mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)
-   run2(aim, intr=x, type_mod, mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)
+ function(aim="est", mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)
+   run2(aim, intr=x, mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)
 }
 
 ```
@@ -857,11 +871,21 @@ fitplot = function(fitted_model, intro){
   p = p + xlab("Observed resistance") + ylab("Predicted resistance")
   p = p + ggtitle(paste0("Observed VS Predicted resistance (minus LogLikelihood =", round(minll, 2), ")"))
   p = p + geom_abline(intercept = 0, slope = 1, linetype = "dashed")
+  p = p + geom_errorbar(aes(ymin = predmod_inf, ymax = predmod_sup), col = "grey")
   p = p + geom_point(shape = 21, size = 3)
   p = p + labs(col = "Probability of introduction (outline):", fill = "Global AMU metric (interior color):")
   p = p + scale_colour_gradient(low = "green", high = "red")
   p = p + scale_fill_gradient(low = "white", high = "blue")
-  p
+  plot(p)
+  
+  # Diagnostic plots:
+  
+  # p2 = ggplot(obs_vs_pred[[1]], aes(x = obsres, y = predmod - obsres, fill = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, col = introduc))
+  # p2 = p2 + geom_hline(yintercept = 0, linetype = "dashed")
+  # p2 = p2 + geom_point(shape = 21, size = 3)
+  # plot(p2)
+  
+  # plot(qqnorm(obs_vs_pred[[1]]$predmod - obs_vs_pred[[1]]$obsres))
 }
 ```
 
@@ -881,9 +905,14 @@ rep_est = function(nrep, minusloglrep, methodrep, controlrep, fixedvar, startvar
     
     valpar = list(mu=NULL, lambda1=NULL, lambda2=NULL, alpha=NULL, beta=NULL, teta=NULL, delta=NULL, eta=NULL, Sd=NULL)
     valpar[fixedvar] = 0
-    valpar[startvar] = runif(length(startvar))
-    valpar[c("mu", "beta", "delta", "eta", "Sd")] = lapply(X = valpar[c("mu", "beta", "delta", "eta", "Sd")], FUN = logit)
     
+    if(type_mod == "linear"){
+      valpar[startvar] = runif(length(startvar))
+      valpar[c("mu", "beta", "delta", "eta", "Sd")] = lapply(X = valpar[c("mu", "beta", "delta", "eta", "Sd")], FUN = logit)
+    }else if(type_mod == "log_beta"){
+      valpar[startvar] = runif(length(startvar), min = -10, max = 10)
+    }
+
     modrep[[repet]] = mle2(minuslogl=minusloglrep, method=methodrep, control=controlrep, fixed=valpar[fixedvar], start=valpar[startvar])
   }
   loglikrep = lapply(X=modrep, FUN=logLik)
@@ -951,8 +980,12 @@ E_step_introperfarm <- function(observed, params) {
 
 E_step <- function(observed, params) {
   
-  sigma = 3 * sigmoid(params[["Sd"]]) # because the parameter is modified when estimated in function "run2"
-  
+  if(type_mod == "linear"){
+    sigma = 3 * sigmoid(params[["Sd"]]) # because the parameter is modified when estimated in function "run2"
+  }else if(type_mod == "log_beta"){
+    sigma = 0.4
+  }
+
   lin_intro = run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
   
   lin_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
@@ -1049,7 +1082,7 @@ EM_algo <- function(modnum, numb_rep_algo=3, tol=1, max.step=30) {
     step = 0
     minloglik = 10^6
     
-    raw_params = list(mu = logit(runif(1)), lambda1 = runif(1,-10,10), lambda2 = runif(1,-10,10), alpha = runif(1,-10,10), beta = logit(runif(1)), teta = runif(1,-10,10), delta = logit(runif(1)), eta = logit(runif(1)), Sd = logit(runif(1)), p_intro = runif(1))
+    introductions_next_step = 0
     
     obs_res = resamu(obj="est", nwkseff=1, thresh_res=0.5, lag_amu_init=1, expo=definition_amu)$obsres
     obs_res = obs_res[! is.na(obs_res)]
@@ -1062,16 +1095,21 @@ EM_algo <- function(modnum, numb_rep_algo=3, tol=1, max.step=30) {
         break
       }
       
+      introductions = introductions_next_step
       print(paste0("Step: ", step))
-      introductions = E_step(observed=obs_res, params=raw_params)
       output_mstep = M_step(introd=introductions, modnum)
       raw_params = output_mstep[[1]]
+      # If we dtermine a prior value for "eta", because it could not be estimated in the first step (no introduction)
+      # if(step == 1){
+      #   raw_params["eta"] = log(0.1)
+      # }
       old.minloglik = minloglik
       minloglik = output_mstep[[2]]
       print(paste0("Minus Log Likelihood: ", minloglik))
       modstep = output_mstep[[3]]
       param_true_format = output_mstep[[4]]
       cycle_id = output_mstep[[5]]
+      introductions_next_step = E_step(observed=obs_res, params=raw_params)
   
       if (abs(minloglik - old.minloglik) < tol){
         counting_for_convergence = counting_for_convergence +1
@@ -1890,14 +1928,16 @@ local_moran = function(decay_param, decay_fun, p_val, style_weight){
   prob_intro_farms$lag = lag.listw(listw_for_test, prob_intro_farms$scaled_prob)
   prob_intro_farms$pval = res.local.moran[,5]
   
-  prob_intro_farms$pval[prob_intro_farms$pval >= p_val] = "N.S."
-  prob_intro_farms$pval[prob_intro_farms$pval < p_val] = "Significant"
+  prob_intro_farms$pval_cat[prob_intro_farms$pval >= 0.1] = ">0.1"
+  prob_intro_farms$pval_cat[prob_intro_farms$pval < 0.1] = "<0.1"
+  prob_intro_farms$pval_cat[prob_intro_farms$pval < 0.05] = "<0.05"
   
   prob_intro_farms$cluster[which((prob_intro_farms$scaled_prob < 0) & (prob_intro_farms$lag < 0))] = "Low-low"
+  prob_intro_farms$cluster[which((prob_intro_farms$scaled_prob >= 0) & (prob_intro_farms$lag >= 0))] = "High-high"
+  prob_intro_farms$cluster = paste0(prob_intro_farms$cluster, " (p", prob_intro_farms$pval_cat, ")")
   prob_intro_farms$cluster[which((prob_intro_farms$scaled_prob >= 0) & (prob_intro_farms$lag < 0))] = "High-low"
   prob_intro_farms$cluster[which((prob_intro_farms$scaled_prob < 0) & (prob_intro_farms$lag >= 0))] = "Low-high"
-  prob_intro_farms$cluster[which((prob_intro_farms$scaled_prob >= 0) & (prob_intro_farms$lag >= 0))] = "High-high"
-  prob_intro_farms$cluster[prob_intro_farms$pval == "N.S."] = "N.S."
+  prob_intro_farms$cluster[prob_intro_farms$pval_cat == ">0.1"] = "p>0.1"
   
   
   p1 = ggplot()
@@ -1908,14 +1948,14 @@ local_moran = function(decay_param, decay_fun, p_val, style_weight){
   p1 = p1 + geom_point(data = prob_intro_farms, aes(x = Long, y = Lat, fill = cluster), col = "black", shape = 21, size = 4)
   p1 = p1 + ggsn::scalebar(dist = 5, location = "topright", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
   p1 = p1 + blank()
-  p1 = p1 + scale_fill_manual("Cluster:", values = c("High-high"="red", "Low-low"="blue", "High-low"="lightpink", "Low-high"="skyblue2", "N.S."="white"))
+  p1 = p1 + scale_fill_manual("Cluster:", values = c("High-high (p<0.05)"="red", "Low-low (p<0.05)"="blue", "High-high (p<0.1)"="lightpink", "Low-low (p<0.1)"="skyblue2", "High-low"="forestgreen", "Low-high"="forestgreen", "p>0.1"="white"))
 
   p2 = ggplot(data = prob_intro_farms, aes(x = scaled_prob, y = lag, fill = cluster))
   p2 = p2 + geom_jitter(col = "black", shape = 21, size = 4, width = 0.05, height = 0.05)
   p2 = p2 + geom_vline(xintercept = 0) + geom_hline(yintercept = 0)
-  # p2 = p2 + geom_smooth(method = 'lm', formula = y~x, col = "red", linetype = "dashed")
+  p2 = p2 + geom_smooth(method = 'lm', formula = y~x, col = "red", linetype = "dashed")
   p2 = p2 + xlab("Scaled probability of introduction") + ylab("Spatial lag")
-  p2 = p2 + scale_fill_manual("Cluster:", values = c("High-high"="red", "Low-low"="blue", "High-low"="lightpink", "Low-high"="skyblue2", "N.S."="white"))
+  p2 = p2 + scale_fill_manual("Cluster:", values = c("High-high (p<0.05)"="red", "Low-low (p<0.05)"="blue", "High-high (p<0.1)"="lightpink", "Low-low (p<0.1)"="skyblue2", "High-low"="forestgreen", "Low-high"="forestgreen", "p>0.1"="white"))
 
   list(p.val.moran=p.val.moran, p1=p1, p2=p2)
 }
@@ -1944,7 +1984,7 @@ ui <- fluidPage(titlePanel("Local Moran's I"),{
       radioButtons("style_weight",
                   "Style of weight:",
                   choices = list("Basic binary" = "B", "Row standardised" = "W", "Globally standardised" = "C", "Globally standardised divided by number of neighbours" = "U"),
-                  selected = "B")
+                  selected = "W")
     ),
     
     mainPanel(
