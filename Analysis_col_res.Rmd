@@ -564,7 +564,12 @@ resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore
       if(lag_amu_init > last_amu_week_consid){
         lag_amu_init = last_amu_week_consid
       }
-      amu_init = c(use_quanti[cyc_i, (1:floor(lag_amu_init))], (lag_amu_init - floor(lag_amu_init)) * use_quanti[cyc_i, ceiling(lag_amu_init)])
+      
+      if(quantuse){
+        amu_init = c(use_quanti[cyc_i, (1:floor(lag_amu_init))], (lag_amu_init - floor(lag_amu_init)) * use_quanti[cyc_i, ceiling(lag_amu_init)])
+      }else{
+        amu_init = c(use_quali[cyc_i, (1:floor(lag_amu_init))], (lag_amu_init - floor(lag_amu_init)) * use_quali[cyc_i, ceiling(lag_amu_init)])
+      }
       
       amu_init = sum(amu_init)
       
