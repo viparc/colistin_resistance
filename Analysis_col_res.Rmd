@@ -97,9 +97,10 @@ ratio_auc = F
 run_shiny = F
 definition_amu = "col"
 amu_model_is_quanti = F
-type_mod = "linear" # "log_beta"
-alread_comp = T
+type_mod = "logis" #"linear"
+alread_comp = F
 test_method_comp = T
+thresh_res = 0.4
 
 ```
 
@@ -522,8 +523,8 @@ This function is useful to:
 
 ```{r}
 
-resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore.nul=F, lag_amu_init, obj="plot", expo){
-  obtab = data.frame(cycle=NA, amu_init=NA, amu_t=NA, obsres=NA, age=NA, init=NA, prev=NA, end=NA)
+resamu = function(nwkseff, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", ignore.nul=F, lag_amu_init, obj="plot", expo){
+  obtab = data.frame(cycle=NA, amu_init=NA, amu_t=NA, resquanti=NA, age=NA, init=NA, prev=NA, end=NA)
   for(cyc_i in 1:n_cyc){
     for(time_i in 2:3){
       
@@ -583,12 +584,12 @@ resamu = function(nwkseff, quantuse=T, tempo_amu="exp_decay", thresh_res, ignore
   }
   obtab$cycle = as.factor(obtab$cycle)
   
-  obtab$res = obtab$obsres >= thresh_res
+  obtab$resquali = (obtab$resquanti >= thresh_res)
 
   if(obj == "plot"){
-    p = ggplot(data=obtab, aes(x=amu_t, y=obsres, col=init))
+    p = ggplot(data=obtab, aes(x=amu_t, y=resquanti, col=init))
     p = p + xlab("Recent AMU") + ylab("Measure of resistance")
-    p = p + ggtitle(paste0("Pearson correlation between recent AMU and the measure of resistance: ", round(cor(obtab$amu_t, obtab$obsres, use="complete.obs"), 3)))
+    p = p + ggtitle(paste0("Pearson correlation between recent AMU and the measure of resistance: ", round(cor(obtab$amu_t, obtab$resquanti, use="complete.obs"), 3)))
     p = p + geom_point()
     p = p + geom_hline(yintercept = thresh_res, linetype="dashed", col="grey")
     p = p + scale_color_gradient(low = "red", high = "blue")
@@ -618,11 +619,6 @@ ui <- fluidPage({
                   min=1,
                   max=15,
                   value=3),
-      sliderInput("thresh_res",
-                  "Threshold value for the measure of resistance:",
-                  min=0,
-                  max=1,
-                  value=0.5),
       selectInput("tempo_amu",
                   "Temporal effect of AMU:",
                   c("exp_decay", "linear", "step")),
@@ -651,14 +647,14 @@ server <- function(input, output){
     # filter the data by the input and save into new object
     # the input id must be the same as the UI object
     # plot
-    resamu(nwkseff=input$nwkseff, lag_amu_init=input$lag_amu_init, expo=input$expo, quantuse=input$quantuse, tempo_amu=input$tempo_amu, thresh_res=input$thresh_res, ignore.nul=input$ignore.nul)
+    resamu(nwkseff=input$nwkseff, lag_amu_init=input$lag_amu_init, expo=input$expo, quantuse=input$quantuse, tempo_amu=input$tempo_amu, ignore.nul=input$ignore.nul)
   })
 }
 
 if(run_shiny){
   shinyApp(ui=ui, server=server)
 }else{
-  resamu(nwkseff = 1.00001, quantuse = F, tempo_amu="exp_decay", thresh_res = 0.5, lag_amu_init = 1, obj="plot", expo="col")
+  resamu(nwkseff = 1.00001, quantuse = F, tempo_amu="exp_decay", lag_amu_init = 1, obj="plot", expo="col")
 }
 rm(ui, server, run_shiny)
 ```
@@ -782,28 +778,28 @@ run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta,
     teta = teta
     eta = sigmoid(eta)
     Sd = 3 * sigmoid(Sd)
-  }else if(type_mod == "log_beta"){
-    eta = exp(eta)
-    Sd = exp(Sd)
+  }else if(type_mod == "logis"){
+    eta = 1
+    Sd = 1
   }
 
-  obsdat = resamu(nwkseff=beta, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", thresh_res=0.4, ignore.nul=F, lag_amu_init=delta, obj="est", expo=definition_amu)
-  obsdat = obsdat[! is.na(obsdat$obsres),]
+  obsdat = resamu(nwkseff=beta, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", ignore.nul=F, lag_amu_init=delta, obj="est", expo=definition_amu)
+  obsdat = obsdat[! is.na(obsdat$resquanti),]
   obsdat$init[is.na(obsdat$init)] = mean(obsdat$init, na.rm=T) # 0
   obsdat$prev[is.na(obsdat$prev)] = mean(obsdat$prev, na.rm=T) # 0
   obsdat$introduc = intr
 
   if(type_mod == "linear"){
     
-    obsdat$predmod_intro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta
+    obsdat$predmod_intro = mu + eta # mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta
     
     obsdat$predmod_nointro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init
     
     obsdat$predmod = obsdat$introduc * obsdat$predmod_intro + (1-obsdat$introduc) * obsdat$predmod_nointro
 
-    # total_loglik = dnorm(x=obsdat$obsres, mean=obsdat$predmod, sd=Sd, log=T)
-    lik_intro = dnorm(x=obsdat$obsres, mean=obsdat$predmod_intro, sd=Sd)
-    lik_nointro = dnorm(x=obsdat$obsres, mean=obsdat$predmod_nointro, sd=Sd)
+    # total_loglik = dnorm(x=obsdat$resquanti, mean=obsdat$predmod, sd=Sd, log=T)
+    lik_intro = dnorm(x=obsdat$resquanti, mean=obsdat$predmod_intro, sd=Sd)
+    lik_nointro = dnorm(x=obsdat$resquanti, mean=obsdat$predmod_nointro, sd=Sd)
     total_loglik = log(obsdat$introduc * lik_intro + (1-obsdat$introduc) * lik_nointro)
     total_loglik[is.infinite(total_loglik)] = -710
 
@@ -816,21 +812,25 @@ run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta,
       obsdat$predmod_inf = qnorm(p = 0.025, mean=obsdat$predmod, sd=Sd)
       obsdat$predmod_sup = qnorm(p = 0.975, mean=obsdat$predmod, sd=Sd)
       
-      return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod", "cycle", "predmod_inf", "predmod_sup")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
+      return(list(obsdat = obsdat[,c("resquanti", "amu_init", "amu_t", "introduc", "predmod", "cycle", "predmod_inf", "predmod_sup", "init")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
     }
   
-  }else if(type_mod == "log_beta"){
+  }else if(type_mod == "logis"){
     
-    obsdat$glm_predmod_intro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta
-    obsdat$glm_predmod_intro = pracma::sigmoid(obsdat$glm_predmod_intro)
+    obsdat$init = (obsdat$init >= thresh_res)
+    obsdat$prev = (obsdat$prev >= thresh_res)
+    
+    obsdat$glm_predmod_intro = eta
     
     obsdat$glm_predmod_nointro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init
     obsdat$glm_predmod_nointro = pracma::sigmoid(obsdat$glm_predmod_nointro)
     
-    obsdat$predmod = obsdat$introduc * obsdat$glm_predmod_intro + (1-obsdat$introduc) * obsdat$glm_predmod_nointro
+    obsdat$predmod = obsdat$introduc * obsdat$glm_predmod_intro + (1-obsdat$introduc) * obsdat$glm_predmod_nointro #(1-obsdat$introduc) * obsdat$glm_predmod_nointro
     
-    # total_loglik = (obsdat$predmod^obsdat$obsres)*((1-obsdat$predmod)^(1-obsdat$obsres))
-    total_loglik = dbeta(x=obsdat$obsres, shape1=Sd, shape2=Sd*(1.00001-obsdat$predmod)/(obsdat$predmod+0.00001), log=T)
+    weights_lkld = 1-obsdat$introduc
+    # total_loglik = weights_lkld * log((obsdat$predmod^obsdat$resquali)*((1-obsdat$predmod)^(1-obsdat$resquali))) /1#sum(weights_lkld)
+    total_loglik = log(weights_lkld*(obsdat$predmod^obsdat$resquali)*((1-obsdat$predmod)^(1-obsdat$resquali)) /sum(weights_lkld))
+    # if(any(is.infinite(total_loglik))){print("CAUTION: Infinite likelihood")}
     total_loglik[is.infinite(total_loglik)] = -710
 
     if(aim == "est"){
@@ -838,11 +838,8 @@ run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta,
       return(-sum(total_loglik))
       
     }else if (aim == "pred"){
-      
-      obsdat$predmod_inf = qbeta(p = 0.025, shape1 = Sd, shape2 = Sd*(1.00001-obsdat$predmod)/(obsdat$predmod+0.00001))
-      obsdat$predmod_sup = qbeta(p = 0.975, shape1 = Sd, shape2 = Sd*(1.00001-obsdat$predmod)/(obsdat$predmod+0.00001))
 
-      return(list(obsdat = obsdat[,c("obsres", "amu_init", "amu_t", "introduc", "predmod", "cycle", "predmod_inf", "predmod_sup")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
+      return(list(obsdat = obsdat[,c("resquali", "amu_init", "amu_t", "introduc", "predmod", "cycle", "resquanti", "init", "prev")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta=eta, Sd=Sd)))
     }
   }
 }
@@ -872,26 +869,79 @@ fitplot = function(fitted_model, intro){
   print("True values of parameters:")
   print(true_fit_coef)
   
-  p = ggplot(obs_vs_pred[[1]], aes(x = obsres, y = predmod, fill = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, col = introduc))
+  if(type_mod == "linear"){
+    p = ggplot(obs_vs_pred[[1]], aes(x = resquali, y = predmod, fill = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, col = introduc))
+  }else if(type_mod == "logis"){
+    p = ggplot(obs_vs_pred[[1]], aes(x = resquanti, y = predmod, fill = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, col = introduc))
+    p = p + geom_vline(xintercept = thresh_res, linetype = "dashed")
+    p = p + geom_hline(yintercept = thresh_res, linetype = "dashed")
+  }
   p = p + xlab("Observed resistance") + ylab("Predicted resistance")
   p = p + ggtitle(paste0("Observed VS Predicted resistance (minus LogLikelihood =", round(minll, 2), ")"))
   p = p + geom_abline(intercept = 0, slope = 1, linetype = "dashed")
-  p = p + geom_errorbar(aes(ymin = predmod_inf, ymax = predmod_sup), col = "grey")
-  p = p + geom_point(shape = 21, size = 3)
+  if(type_mod == "linear"){
+    p = p + geom_errorbar(aes(ymin = predmod_inf, ymax = predmod_sup), col = "grey")
+  }
+  p = p + geom_jitter(shape = 21, size = 3)
   p = p + labs(col = "Probability of introduction (outline):", fill = "Global AMU metric (interior color):")
   p = p + scale_colour_gradient(low = "green", high = "red")
   p = p + scale_fill_gradient(low = "white", high = "blue")
   plot(p)
   
-  # Diagnostic plots:
-  
-  # p2 = ggplot(obs_vs_pred[[1]], aes(x = obsres, y = predmod - obsres, fill = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, col = introduc))
-  # p2 = p2 + geom_hline(yintercept = 0, linetype = "dashed")
-  # p2 = p2 + geom_point(shape = 21, size = 3)
-  # plot(p2)
-  
-  # plot(qqnorm(obs_vs_pred[[1]]$predmod - obs_vs_pred[[1]]$obsres))
+  if(type_mod == "logis"){
+    for_curve = data.frame(amu = seq(0, max(obs_vs_pred[[1]]$amu_t), 0.01), amr = sigmoid(true_fit_coef["mu"] + true_fit_coef["alpha"] * seq(0, max(obs_vs_pred[[1]]$amu_t), 0.01)))
+    
+    p2 = ggplot()
+    p2 = p2 + xlab("Recent AMU") + ylab("Observed resistance (quanti)")
+    p2 = p2 + ggtitle("Resistance = f(recent amu)")
+    p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = true_fit_coef["eta"]), col = "red")
+    p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = amr), col = "green")
+    p2 = p2 + geom_point(data = obs_vs_pred[[1]], aes(x = amu_t, y = resquanti, col = introduc, fill = predmod, shape = (predmod>=thresh_res)), size = 3)
+    p2 = p2 + scale_color_gradient(name = "Probability of introduction", low = "green", high = "red")
+    p2 = p2 + scale_fill_gradient(name = "Predicted resistance", low = "white", high = "blue")
+    p2 = p2 + scale_shape_manual(name = "Predicted resistance (quali)", values = c(21, 22))
+    plot(p2)
+    
+    p3 = ggplot()
+    p3 = p3 + xlab("Recent AMU") + ylab("Observed resistance (quali)")
+    p3 = p3 + ggtitle("Resistance = f(recent amu)")
+    p3 = p3 + geom_line(data=for_curve, aes(x = amu, y = true_fit_coef["eta"]), col = "red")
+    p3 = p3 + geom_line(data=for_curve, aes(x = amu, y = amr), col = "green")
+    p3 = p3 + geom_point(data = obs_vs_pred[[1]], aes(x = amu_t, y = as.numeric(resquali), col = introduc, shape = (predmod>=thresh_res)), size = 3)
+    p3 = p3 + scale_color_gradient(name = "Probability of introduction", low = "green", high = "red")
+    p3 = p3 + scale_shape_manual(name = "Predicted resistance (quali)", values = c(16, 17))
+    plot(p3)
+    
+    print(paste0("Sensitivity: ", sum((obs_vs_pred[[1]]$predmod >= thresh_res) & (obs_vs_pred[[1]]$resquali))/sum(obs_vs_pred[[1]]$resquali)))
+    print(paste0("Specificity: ", sum((obs_vs_pred[[1]]$predmod >= thresh_res) & (obs_vs_pred[[1]]$resquali))/sum(obs_vs_pred[[1]]$predmod >= thresh_res)))
+  }
 }
+
+fitplot_for_EMalgo = function(fitted_model, intro){
+  fit_coef = coef(fitted_model)
+  
+  obs_vs_pred = run2(aim="pred", intr=intro, mu=fit_coef["mu"], lambda1=fit_coef["lambda1"], lambda2=fit_coef["lambda2"], alpha=fit_coef["alpha"], beta=fit_coef["beta"], teta=fit_coef["teta"], delta=fit_coef["delta"], eta=fit_coef["eta"], Sd=fit_coef["Sd"])
+  
+  minll = obs_vs_pred[[2]]
+
+  true_fit_coef = obs_vs_pred[[3]]
+  
+  if(type_mod == "logis"){
+    for_curve = data.frame(amu = seq(0, max(obs_vs_pred[[1]]$amu_t), 0.01), amr = sigmoid(true_fit_coef["mu"] + true_fit_coef["alpha"] * seq(0, max(obs_vs_pred[[1]]$amu_t), 0.01)))
+    
+    p2 = ggplot()
+    p2 = p2 + xlab("Recent AMU") + ylab("Observed resistance (quanti)")
+    p2 = p2 + ggtitle("Resistance = f(recent amu)")
+    p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = true_fit_coef["eta"]), col = "red")
+    p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = amr), col = "green")
+    p2 = p2 + geom_point(data = obs_vs_pred[[1]], aes(x = amu_t, y = resquanti, col = introduc, fill = predmod, shape = (predmod>=thresh_res)), size = 3)
+    p2 = p2 + scale_color_gradient(name = "Probability of introduction", low = "green", high = "red")
+    p2 = p2 + scale_fill_gradient(name = "Predicted resistance", low = "white", high = "blue")
+    p2 = p2 + scale_shape_manual(name = "Predicted resistance (quali)", values = c(21, 22))
+    plot(p2)
+  }
+}
+
 ```
 
 ### Function repeating the fit several times
@@ -903,19 +953,28 @@ The function takes as inputs the model's parameters that should be fixed (not es
 It is made such that the random initialization of parameters is different from one repetition to another.
 
 ```{r}
-rep_est = function(nrep, minusloglrep, methodrep, controlrep, fixedvar, startvar){
+rep_est = function(nrep, minusloglrep, methodrep, controlrep, prev_est, fixedvar, startvar){
   modrep = list()
+  if(prev_est[1] == "none"){nrep = 20}
+  
   for(repet in 1:nrep){
     cat("\r", paste0("Fit repetition ", repet, "/", nrep))
     
     valpar = list(mu=NULL, lambda1=NULL, lambda2=NULL, alpha=NULL, beta=NULL, teta=NULL, delta=NULL, eta=NULL, Sd=NULL)
     valpar[fixedvar] = 0
     
-    if(type_mod == "linear"){
-      valpar[startvar] = runif(length(startvar))
-      valpar[c("mu", "beta", "delta", "eta", "Sd")] = lapply(X = valpar[c("mu", "beta", "delta", "eta", "Sd")], FUN = logit)
-    }else if(type_mod == "log_beta"){
-      valpar[startvar] = runif(length(startvar), min = -10, max = 10)
+    if(prev_est[1] == "none"){
+      
+      if(type_mod == "linear"){
+        valpar[startvar] = runif(length(startvar))
+        valpar[c("mu", "beta", "delta", "eta", "Sd")] = lapply(X = valpar[c("mu", "beta", "delta", "eta", "Sd")], FUN = logit)
+      }else if(type_mod == "logis"){
+        valpar[startvar] = runif(length(startvar), min = -100, max = 100)
+        valpar[c("beta", "delta")] = logit(runif(2))
+      }
+      
+    }else{
+      valpar[startvar] = prev_est[startvar]
     }
 
     modrep[[repet]] = mle2(minuslogl=minusloglrep, method=methodrep, control=controlrep, fixed=valpar[fixedvar], start=valpar[startvar])
@@ -952,65 +1011,46 @@ $$p(R_i \in M_{intro}) = \frac{exp(\frac{-(r_{intro}^i)^2}{2.\sigma^2})}{exp(\fr
 (Sources: http://www.cs.huji.ac.il/~yweiss/emTutorial.pdf ; http://www.di.fc.ul.pt/~jpn/r/EM/EM.html#eg-em-with-mix-of-two-linear-models)
 
 ```{r}
-E_step_introperfarm <- function(observed, params) {
-
-  sigma = 3 * sigmoid(params[["Sd"]]) # because the parameter is modified when estimated in function "run2"
-  
-  lin_intro = run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]][, c("predmod","cycle")]
-  
-  lin_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]][, c("predmod","cycle")]
-
-  # Residuals of observations under models "Intro" and "No intro"
-  lin_intro$r = (abs(lin_intro$predmod - observed))^2
-  lin_nointro$r = (abs(lin_nointro$predmod - observed))^2
-
-   # Adds a column with the sum of r_intro for the 2 (or 1) sample of the same cycle:
-  lin_intro = merge(x = lin_intro, by.x = "cycle", y = stats::aggregate(x = lin_intro$r, by = list(lin_intro$cycle), FUN = sum), by.y = "Group.1")
-  lin_nointro = merge(x = lin_nointro, by.x = "cycle", y = stats::aggregate(x = lin_nointro$r, by = list(lin_nointro$cycle), FUN = sum), by.y = "Group.1")
-  
-  # Residuals follow a normal distribution
-  exp_intro = exp(- lin_intro$x/(2*sigma^2))
-  exp_nointro = exp(- lin_nointro$x/(2*sigma^2))
-
-  exp_intro = pmin(0.9999, exp_intro)
-  exp_intro = pmax(0.0001, exp_intro)
-  exp_nointro = pmin(0.9999, exp_nointro)
-  exp_nointro = pmax(0.0001, exp_nointro)
-
-  # Probability of "Intro":
-  prob_intro = exp_intro / (exp_intro + exp_nointro)
-
-  prob_intro
-}
 
 E_step <- function(observed, params) {
   
   if(type_mod == "linear"){
     sigma = 3 * sigmoid(params[["Sd"]]) # because the parameter is modified when estimated in function "run2"
-  }else if(type_mod == "log_beta"){
-    sigma = 0.4
+  }else if(type_mod == "logis"){
+    sigma = 0.1
   }
 
-  lin_intro = run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
-  
-  lin_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
+  pred_intro = 1 #run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
+
+  pred_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
   
   # Residuals of observations under models "Intro" and "No intro"
-  r_intro = abs(lin_intro - observed)
-  r_nointro = abs(lin_nointro - observed)
-  
+  r_intro = abs(pred_intro - observed)
+  r_nointro = abs(pred_nointro - observed)
+
   # Residuals follow a normal distribution
   exp_intro = exp(- r_intro^2/(2*sigma^2))
   exp_nointro = exp(- r_nointro^2/(2*sigma^2))
-  
+
   exp_intro = pmin(0.9999, exp_intro)
   exp_intro = pmax(0.0001, exp_intro)
   exp_nointro = pmin(0.9999, exp_nointro)
   exp_nointro = pmax(0.0001, exp_nointro)
   
   # Probability of "Intro":
-  prob_intro = exp_intro / (exp_intro + exp_nointro)
-  
+  if(type_mod == "linear"){
+    prob_intro = exp_intro / (exp_intro + exp_nointro)
+  }else if(type_mod == "logis"){
+    prob_intro = 1 - (r_intro/ (r_intro + r_nointro))
+    # prob_intro = pmax(pmin(prob_intro, 0.99), 0.01)
+    # prob_intro = sigmoid(20* (0.5 - (r_intro/ (r_intro + r_nointro))))
+    # prob_intro[which(observed < pred_nointro)] = 0
+    # prob_intro[which((prob_intro >0.4) & (prob_intro <0.6))] = 0.5
+    # prob_intro[prob_intro >0.5] = 1
+    # prob_intro[prob_intro <0.5] = 0
+  }
+  # prob_intro = exp_intro / (exp_intro + exp_nointro)
+
   prob_intro
 }
 
@@ -1025,35 +1065,35 @@ The likelihood is defined as:
 $$L(\Theta|R_1,...,R_i,...) = \prod_{i}(p(R_i \in M_{intro}).L(\Theta|R_i,R_i \in M_{intro}) + p(R_i \in M_{nointro}).L(\Theta|R_i,R_i \in M_{nointro}))$$
 
 ```{r}
-M_step <- function(introd, modnum) {
+M_step <- function(introd, modnum, prevfit) {
 
   prop_intro = mean(introd)
   
   #####
   if(modnum == 13){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"), startvar = c("mu", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta", "Sd", "eta"), startvar = c("mu"))
   }else if(modnum == 14){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta"), startvar = c("mu",  "lambda1", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda1"))
   }else if(modnum == 15){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta"), startvar = c("mu",  "lambda1",  "lambda2", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "alpha",  "beta",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "lambda2"))
   }else if(modnum == 16){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "alpha",  "beta"), startvar = c("mu",  "teta",  "delta", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda1",  "lambda2",  "alpha",  "beta", "Sd", "eta"), startvar = c("mu",  "teta",  "delta"))
   }else if(modnum == 17){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta"), startvar = c("mu",  "lambda1",  "teta",  "delta", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda2",  "alpha",  "beta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "teta",  "delta"))
   }else if(modnum == 18){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "alpha",  "beta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta"))
   }else if(modnum == 19){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta"), startvar = c("mu",  "alpha",  "beta", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "alpha",  "beta"))
   }else if(modnum == 20){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta"), startvar = c("mu",  "lambda1",  "alpha",  "beta", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda2",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta"))
   }else if(modnum == 21){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta"))
   }else if(modnum == 22){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda1",  "lambda2", "Sd", "eta"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta"))
   }else if(modnum == 23){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda2", "Sd", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta"))
   }else if(modnum == 24){
-    modstep = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c(), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta", "Sd"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("Sd", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"))
   }
   #####
   
@@ -1065,6 +1105,7 @@ M_step <- function(introd, modnum) {
   true_coef = ob_pred[[3]]
   number_cycle = ob_pred[[1]]$cycle
   
+  print(true_coef)
   list(raw_coef, llmod, modstep, true_coef, number_cycle)
 }
 ```
@@ -1076,7 +1117,7 @@ We repeat the algorithm several times to make sure the whole space has been expl
 Convergence is defined as: the distance between the likelihood and the former likelihood is less than 1, 3 times in a row.
 
 ```{r}
-EM_algo <- function(modnum, numb_rep_algo=3, tol=1, max.step=30) {
+EM_algo <- function(modnum, numb_rep_algo=5, tol=0.1, max.step=50) {
 
   repetalgo = list()
   repetalgo_minloglik = c()
@@ -1088,25 +1129,26 @@ EM_algo <- function(modnum, numb_rep_algo=3, tol=1, max.step=30) {
     minloglik = 10^6
     
     introductions_next_step = 0
+    raw_params = "none"
     
-    obs_res = resamu(obj="est", nwkseff=1, thresh_res=0.5, lag_amu_init=1, expo=definition_amu)$obsres
+    obs_res = resamu(obj="est", nwkseff=1, lag_amu_init=1, expo=definition_amu)$resquanti
     obs_res = obs_res[! is.na(obs_res)]
 
     counting_for_convergence = 0
-    while((counting_for_convergence <2) & (step <= max.step+1)){
+    while((step < 4) | ((counting_for_convergence <2) & (step <= max.step+1))){
       step = step +1
       if(step == max.step+1){
         print(paste0("Convergence of the likelihood was not reached after ", max.step, " steps."))
         break
       }
       
-      introductions = introductions_next_step
       print(paste0("Step: ", step))
-      output_mstep = M_step(introd=introductions, modnum)
+      introductions = introductions_next_step
+      output_mstep = M_step(introd=introductions, modnum, prevfit=raw_params)
       raw_params = output_mstep[[1]]
-      # If we dtermine a prior value for "eta", because it could not be estimated in the first step (no introduction)
+      # If we determine a prior value for "eta", because it could not be estimated in the first step (no introduction)
       # if(step == 1){
-      #   raw_params["eta"] = log(0.1)
+      #   raw_params["eta"] = 5
       # }
       old.minloglik = minloglik
       minloglik = output_mstep[[2]]
@@ -1115,7 +1157,9 @@ EM_algo <- function(modnum, numb_rep_algo=3, tol=1, max.step=30) {
       param_true_format = output_mstep[[4]]
       cycle_id = output_mstep[[5]]
       introductions_next_step = E_step(observed=obs_res, params=raw_params)
-  
+      fitplot_for_EMalgo(modstep, introductions)
+      fitplot_for_EMalgo(modstep, introductions_next_step)
+
       if (abs(minloglik - old.minloglik) < tol){
         counting_for_convergence = counting_for_convergence +1
       }else{
@@ -1157,83 +1201,92 @@ rm(res_data)
 
 #### Scenario 1
 
-We create fake resistance data such that there is no linear relationship with recent AMU and no introduction: the resistance just follows a normal distribution of mean 0.5.
+We create fake resistance data such that there is no relationship with recent AMU and no introduction: the resistance just follows a normal distribution of mean 0.4. This test has an interest for non bimodal data.
 
 ```{r, fig.width=7, fig.height=5}
-if(test_method_comp){
-  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_1.rdata")
-  res_data = test_scenario_1[[1]]
-}else{
-  res_data = as.data.frame(cbind(res_data_saved$S, rnorm(n_cyc, 0.5, 0.05), rnorm(n_cyc, 0.5, 0.05)))
+if(type_mod == "linear"){
+  if(test_method_comp){
+    load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_1.rdata")
+    res_data = test_scenario_1[[1]]
+  }else{
+    res_data = as.data.frame(cbind(res_data_saved$S, rnorm(n_cyc, 0.4, 0.05), rnorm(n_cyc, 0.4, 0.05)))
+  }
+  
+  hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
+  resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="col")
 }
-
-plot(hist(as.numeric(as.matrix(res_data)), nclass = 15), col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
-resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
 
 ```
 
 We fit models 1, 7, 13, 19:
 
 ```{r, fig.width=6, fig.height=4}
-
-if(test_method_comp){
-  fit_model_1 = test_scenario_1[[2]]
-  fit_model_7 = test_scenario_1[[3]]
-  results_mod13 = test_scenario_1[[4]]
-  results_mod19 = test_scenario_1[[5]]
-}else{
-  fit_model_1 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
-
-  fit_model_7 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
-
-  results_mod13 = EM_algo(modnum=13, numb_rep_algo=3)
-
-  results_mod19 = EM_algo(modnum=19, numb_rep_algo=3)
+if(type_mod == "linear"){
   
-  test_scenario_1 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
-  save(test_scenario_1, file = "C:/Users/Jonathan/Desktop/test_scenario_1.rdata")
+  if(test_method_comp){
+    fit_model_1 = test_scenario_1[[2]]
+    fit_model_7 = test_scenario_1[[3]]
+    results_mod13 = test_scenario_1[[4]]
+    results_mod19 = test_scenario_1[[5]]
+  }else{
+    fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
+  
+    fit_model_7 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta"))
+  
+    results_mod13 = EM_algo(modnum=13, numb_rep_algo=3)
+  
+    results_mod19 = EM_algo(modnum=19, numb_rep_algo=3)
+    
+    test_scenario_1 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
+    save(test_scenario_1, file = "C:/Users/Jonathan/Desktop/test_scenario_1.rdata")
+  }
+  
+  fitplot(fitted_model = fit_model_1, intro = 0)
+  fitplot(fitted_model = fit_model_7, intro = 0)
+  fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
+  fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+  
+  rm(res_data)
 }
-
-fitplot(fitted_model = fit_model_1, intro = 0)
-fitplot(fitted_model = fit_model_7, intro = 0)
-fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
-fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
-
-rm(res_data)
-
 ```
 
 Let us compare models' AIC. Minimum AIC should be model 1.
 
 ```{r}
-print("AIC of model 1:")
-AIC(fit_model_1)
-
-print("AIC of model 7:")
-AIC(fit_model_7)
-
-print("AIC of model 13:")
-AIC(results_mod13[[1]]) + 2*results_mod13[["number_obs"]]
-
-print("AIC of model 19:")
-AIC(results_mod19[[1]]) + 2*results_mod19[["number_obs"]]
+if(type_mod == "linear"){
+  
+  print("AIC of model 1:")
+  bbmle::AIC(fit_model_1)
+  
+  print("AIC of model 7:")
+  bbmle::AIC(fit_model_7)
+  
+  print("AIC of model 13:")
+  bbmle::AIC(results_mod13[[1]]) #+ 2*results_mod13[["number_obs"]]
+  
+  print("AIC of model 19:")
+  bbmle::AIC(results_mod19[[1]]) #+ 2*results_mod19[["number_obs"]]
+  
+  print("Anova with models 1 and 7 (for instance):")
+  bbmle::anova(fit_model_1, fit_model_7)
+}
 
 ```
 
 #### Scenario 2
 
-We create fake resistance data such that there is no linear relationship with recent AMU but there are introductions: the resistance follows a normal distribution of mean 0.2 (no introduction) or 0.7 (an introduction occurred).
+We create fake resistance data such that there is no relationship with recent AMU but there are introductions: the resistance follows a normal distribution of mean 0.2 (no introduction) or 0.7 (an introduction occurred).
 
 ```{r, fig.width=7, fig.height=5}
 if(test_method_comp){
   load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_2.rdata")
   res_data = test_scenario_2[[1]]
 }else{
-  res_data = as.data.frame(cbind(res_data_saved$S, rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.7,0.3)), rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.7,0.3))))
+  res_data = as.data.frame(cbind(res_data_saved$S, rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.5,0.5)), rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.5,0.5))))
 }
 
-plot(hist(as.numeric(as.matrix(res_data)), nclass = 15), col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
-resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
+hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
+resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="col")
 
 ```
 
@@ -1247,13 +1300,13 @@ if(test_method_comp){
   results_mod13 = test_scenario_2[[4]]
   results_mod19 = test_scenario_2[[5]]
 }else{
-  fit_model_1 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
+  fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
 
-  fit_model_7 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
+  fit_model_7 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta"))
 
-  results_mod13 = EM_algo(modnum=13, numb_rep_algo=3)
+  results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
 
-  results_mod19 = EM_algo(modnum=19, numb_rep_algo=3)
+  results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
   
   test_scenario_2 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
   save(test_scenario_2, file = "C:/Users/Jonathan/Desktop/test_scenario_2.rdata")
@@ -1264,7 +1317,7 @@ fitplot(fitted_model = fit_model_7, intro = 0)
 fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
 fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
 
-rm(res_data)
+# rm(res_data)
 
 ```
 
@@ -1272,47 +1325,85 @@ Let us compare models' AIC. Minimum AIC should be model 13.
 
 ```{r}
 print("AIC of model 1:")
-AIC(fit_model_1)
+bbmle::AIC(fit_model_1)
 
 print("AIC of model 7:")
-AIC(fit_model_7)
+bbmle::AIC(fit_model_7)
 
 print("AIC of model 13:")
-AIC(results_mod13[[1]]) + 2*results_mod13[["number_obs"]]
+bbmle::AIC(results_mod13[[1]]) #+ 2*results_mod13[["number_obs"]]
 
 print("AIC of model 19:")
-AIC(results_mod19[[1]]) + 2*results_mod19[["number_obs"]]
+bbmle::AIC(results_mod19[[1]]) #+ 2*results_mod19[["number_obs"]]
+
+print("Anovas:")
+bbmle::anova(fit_model_7, results_mod19[[1]])
+bbmle::anova(results_mod13[[1]], results_mod19[[1]])
 
 ```
 
 #### Scenario 3
 
-We create fake resistance data such that the relationship with recent AMU is linear, with $\beta_{fake} = 8$ (`beta_fake`) and $\alpha_{fake} = 0.4$ (`alpha_fake`).
+We create fake resistance data such that there is a relationship with recent AMU, but not many "Low use, high resistance" data points that correspond to introductions.
 
 ```{r, fig.width=7, fig.height=5}
 if(test_method_comp){
   load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_3.rdata")
   res_data = test_scenario_3[[1]]
 }else{
-  beta_fake = 8
-  alpha_fake = 0.55
-  
-  res_data = res_data_saved
-  fake_res = run2(aim="pred", intr=0, mu=logit(0.05), lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]$predmod
-  rm(res_data)
-  fake_res = fake_res + rnorm(length(fake_res), 0, 0.05)
-  
-  na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
-  if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
-  fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
-  
-  res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
-  
-  rm(beta_fake, alpha_fake, fake_res, na_res_val)
+  if(type_mod == "linear"){
+    
+    mu_fake = logit(0.05)
+    beta_fake = 8
+    alpha_fake = 0.55
+    
+    res_data = res_data_saved
+    fake_res = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]$predmod
+    rm(res_data)
+    fake_res = fake_res + rnorm(length(fake_res), 0, 0.05)
+    
+    na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
+    if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
+    fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
+    
+    res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
+    rm(beta_fake, alpha_fake, fake_res, na_res_val)
+    
+  }else if(type_mod == "logis"){
+    
+    mu_fake = -15
+    beta_fake = 8
+    alpha_fake = 20
+    
+    res_data = res_data_saved
+    fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]
+    rm(res_data)
+    fake_res = fake_obsdat$predmod
+    fake_amu = fake_obsdat$amu_t
+    
+    low_use_high_res = NULL #sample(x = which(fake_amu < 0.5), size = 1)
+    fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
+
+    low_use_low_res = setdiff(which(fake_amu < 0.5), low_use_high_res)
+    fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
+    
+    high_use_low_res = NULL #sample(x = which(fake_amu >= 0.5), size = 1)#35
+    fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
+    
+    high_use_high_res = setdiff(which(fake_amu >= 0.5), high_use_low_res)
+    fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
+    
+    na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
+    if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
+    fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
+    
+    res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
+    rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
+  }
 }
 
-plot(hist(as.numeric(as.matrix(res_data)), nclass = 15), col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
-resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
+hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
+resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="col")
 
 ```
 
@@ -1326,13 +1417,13 @@ if(test_method_comp){
   results_mod13 = test_scenario_3[[4]]
   results_mod19 = test_scenario_3[[5]]
 }else{
-  fit_model_1 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
+  fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
 
-  fit_model_7 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
+  fit_model_7 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta"))
 
-  results_mod13 = EM_algo(modnum=13, numb_rep_algo=3)
+  results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
 
-  results_mod19 = EM_algo(modnum=19, numb_rep_algo=3)
+  results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
   
   test_scenario_3 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
   save(test_scenario_3, file = "C:/Users/Jonathan/Desktop/test_scenario_3.rdata")
@@ -1343,7 +1434,7 @@ fitplot(fitted_model = fit_model_7, intro = 0)
 fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
 fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
 
-rm(res_data)
+# rm(res_data)
 
 ```
 
@@ -1351,50 +1442,91 @@ Let us compare models' AIC. Minimum AIC should be model 7.
 
 ```{r}
 print("AIC of model 1:")
-AIC(fit_model_1)
+bbmle::AIC(fit_model_1)
 
 print("AIC of model 7:")
-AIC(fit_model_7)
+bbmle::AIC(fit_model_7)
 
 print("AIC of model 13:")
-AIC(results_mod13[[1]]) + 2*results_mod13[["number_obs"]]
+bbmle::AIC(results_mod13[[1]]) #+ 2*results_mod13[["number_obs"]]
 
 print("AIC of model 19:")
-AIC(results_mod19[[1]]) + 2*results_mod19[["number_obs"]]
+bbmle::AIC(results_mod19[[1]]) #+ 2*results_mod19[["number_obs"]]
+
+print("Anovas:")
+bbmle::anova(fit_model_7, results_mod19[[1]])
+bbmle::anova(results_mod13[[1]], results_mod19[[1]])
 
 ```
 
 #### Scenario 4
 
-We create fake resistance data such that the relationship with recent AMU is linear, with $\beta_{fake} = 8$ (`beta_fake`) and $\alpha_{fake} = 0.4$ (`alpha_fake`). We add introductions for some samples.
+We create fake resistance data such that there is a relationship with recent AMU. We also add "Low use, high resistance" data points that correspond to introductions.
 
 ```{r, fig.width=7, fig.height=5}
 if(test_method_comp){
   load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_4.rdata")
   res_data = test_scenario_4[[1]]
 }else{
-  beta_fake = 8
-  alpha_fake = 0.55
+  if(type_mod == "linear"){
+    mu_fake = logit(0.05)
+    beta_fake = 8
+    alpha_fake = 0.55
+    
+    res_data = res_data_saved
+    type_mod_saved = type_mod
+    fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]
+    fake_res = fake_obsdat$predmod
+    fake_amu = fake_obsdat$amu_t
+    rm(res_data)
+    fake_res = fake_res + rnorm(length(fake_res), 0, 0.05)
+    
+    introd_fake = sample(x = which(fake_res < 0.25), size = round(0.3*sum(fake_res < 0.25)))
+    fake_res[introd_fake] = rnorm(length(introd_fake), 0.6, 0.05)
+    
+    fake_res[42] = rnorm(1, 0.1, 0.05)
   
-  res_data = res_data_saved
-  fake_res = run2(aim="pred", intr=0, mu=logit(0.05), lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]$predmod
-  rm(res_data)
-  fake_res = fake_res + rnorm(length(fake_res), 0, 0.05)
+    na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
+    if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
+    fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
+    
+    res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
+    rm(beta_fake, alpha_fake, introd_fake, fake_res, na_res_val, fake_obsdat)
   
-  introd_fake = sample(x = which(fake_res < 0.25), size = round(0.3*sum(fake_res < 0.25)))
-  fake_res[introd_fake] = rnorm(length(introd_fake), 0.6, 0.05)
+  }else if(type_mod == "logis"){
+    mu_fake = -15
+    beta_fake = 8
+    alpha_fake = 20
+    
+    res_data = res_data_saved
+    fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]
+    rm(res_data)
+    fake_res = fake_obsdat$predmod
+    fake_amu = fake_obsdat$amu_t
+    
+    low_use_high_res = sample(x = which(fake_amu < 0.5), size = round(0.3*sum(fake_res < 0.5)))
+    fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
 
-  na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
-  if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
-  fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
-  
-  res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
-  
-  rm(beta_fake, alpha_fake, introd_fake, fake_res, na_res_val)
+    low_use_low_res = setdiff(which(fake_amu < 0.5), low_use_high_res)
+    fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
+    
+    high_use_low_res = 35 #42 #sample(x = which(fake_amu >= 0.5), size = 1) #NULL
+    fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
+    
+    high_use_high_res = setdiff(which(fake_amu >= 0.5), high_use_low_res)
+    fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
+    
+    na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
+    if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
+    fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
+    
+    res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
+    rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
+  }
 }
 
-plot(hist(as.numeric(as.matrix(res_data)), nclass = 15), col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
-resamu(nwkseff = 8, quantuse=F, thresh_res = 0.5, lag_amu_init = 1, expo="col")
+hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
+resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="col")
 
 ```
 
@@ -1408,13 +1540,13 @@ if(test_method_comp){
   results_mod13 = test_scenario_4[[4]]
   results_mod19 = test_scenario_4[[5]]
 }else{
-  fit_model_1 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
+  fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
 
-  fit_model_7 = rep_est(nrep=5, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
+  fit_model_7 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta"))
 
-  results_mod13 = EM_algo(modnum=13, numb_rep_algo=3)
+  results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
 
-  results_mod19 = EM_algo(modnum=19, numb_rep_algo=3)
+  results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
   
   test_scenario_4 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
   save(test_scenario_4, file = "C:/Users/Jonathan/Desktop/test_scenario_4.rdata")
@@ -1425,7 +1557,7 @@ fitplot(fitted_model = fit_model_7, intro = 0)
 fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
 fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
 
-rm(res_data)
+# rm(res_data)
 
 ```
 
@@ -1433,16 +1565,20 @@ Let us compare models' AIC. Minimum AIC should be model 19.
 
 ```{r}
 print("AIC of model 1:")
-AIC(fit_model_1)
+bbmle::AIC(fit_model_1)
 
 print("AIC of model 7:")
-AIC(fit_model_7)
+bbmle::AIC(fit_model_7)
 
 print("AIC of model 13:")
-AIC(results_mod13[[1]]) + 2*results_mod13[["number_obs"]]
+bbmle::AIC(results_mod13[[1]]) #+ 2*results_mod13[["number_obs"]]
 
 print("AIC of model 19:")
-AIC(results_mod19[[1]]) + 2*results_mod19[["number_obs"]]
+bbmle::AIC(results_mod19[[1]]) #+ 2*results_mod19[["number_obs"]]
+
+print("Anovas:")
+bbmle::anova(fit_model_7, results_mod19[[1]])
+bbmle::anova(results_mod13[[1]], results_mod19[[1]])
 
 ```
 
@@ -1472,32 +1608,31 @@ if(alread_comp){
   }
   
 }else{
-  introd = 0
   lfit = list()
   
-  lfit[[1]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta"), startvar = c("mu", "Sd"))
+  lfit[[1]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
   
-  lfit[[2]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1", "Sd"))
+  lfit[[2]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1"))
   
-  lfit[[3]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2", "Sd"))
+  lfit[[3]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "alpha",  "beta",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "lambda2"))
   
-  lfit[[4]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta"), startvar = c("mu", "teta", "delta", "Sd"))
+  lfit[[4]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta", "Sd"), startvar = c("mu", "teta", "delta"))
   
-  lfit[[5]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "teta",  "delta", "Sd"))
+  lfit[[5]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda2",  "alpha",  "beta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "teta",  "delta"))
   
-  lfit[[6]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "alpha",  "beta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta", "Sd"))
+  lfit[[6]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "alpha",  "beta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta"))
   
-  lfit[[7]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "alpha",  "beta", "Sd"))
+  lfit[[7]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta"))
   
-  lfit[[8]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2",  "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta", "Sd"))
+  lfit[[8]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "alpha",  "beta"))
   
-  lfit[[9]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "teta",  "delta", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta", "Sd"))
+  lfit[[9]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta"))
   
-  lfit[[10]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda1",  "lambda2", "eta"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta", "Sd"))
+  lfit[[10]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta"))
   
-  lfit[[11]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c( "lambda2", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta", "Sd"))
+  lfit[[11]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda2", "eta", "Sd"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta"))
   
-  lfit[[12]] = rep_est(nrep=5, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), fixedvar = c("eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta", "Sd"))
+  lfit[[12]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("eta", "Sd"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"))
   
   rm(introd)
 }
@@ -1522,15 +1657,15 @@ if(alread_comp){
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resulpar_13to21 = parLapply(cl, X=13:21, fun=EM_algo, numb_rep_algo=3)
+  clusterExport(cl, c("thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  resulpar_13to21 = parLapply(cl, X=13:21, fun=EM_algo, numb_rep_algo=1)
   stopCluster(cl)
   save(resulpar_13to21, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_13to21.rdata"))
   
   cl<-makeCluster(3)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resulpar_22to24 = parLapply(cl, X=22:24, fun=EM_algo, numb_rep_algo=3)
+  clusterExport(cl, c("thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  resulpar_22to24 = parLapply(cl, X=22:24, fun=EM_algo, numb_rep_algo=1)
   stopCluster(cl)
   save(resulpar_22to24, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_22to24.rdata"))
 
@@ -1559,7 +1694,7 @@ where $N$ is the total number of models, and $AIC_k$ is the AIC of model $k$.
 ```{r, fig.width=8, fig.height=6}
 l_loglik = unlist(lapply(X = lfit, FUN = logLik))
 l_aic = unlist(lapply(X = lfit, FUN = AIC))
-l_aic[13:24] = l_aic[13:24] + 2*resulpar[[1]][["number_obs"]]
+l_aic[13:24] = l_aic[13:24] #+ 2*resulpar[[1]][["number_obs"]]
 
 l_aic_weights = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
 
