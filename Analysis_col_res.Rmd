@@ -99,7 +99,7 @@ definition_amu = "col"
 amu_model_is_quanti = F
 type_mod = "logis" #"linear"
 alread_comp = F
-test_method_comp = T
+test_method_comp = F
 thresh_res = 0.4
 
 ```
@@ -828,10 +828,12 @@ run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta,
     
     obsdat$predmod = obsdat$introduc * obsdat$glm_predmod_intro + (1-obsdat$introduc) * obsdat$glm_predmod_nointro #(1-obsdat$introduc) * obsdat$glm_predmod_nointro
     
-    weights_lkld = (1-obsdat$introduc)
-    # total_loglik = weights_lkld * log((obsdat$predmod^obsdat$resquali)*((1-obsdat$predmod)^(1-obsdat$resquali))) /1#sum(weights_lkld)
-    total_loglik = log(weights_lkld*(obsdat$predmod^obsdat$resquali)*((1-obsdat$predmod)^(1-obsdat$resquali)) /sum(weights_lkld))
-    # if(any(is.infinite(total_loglik))){print("CAUTION: Infinite likelihood")}
+    if(sum(intr) == 0){
+      weights_lkld = 1
+    }else{
+      weights_lkld =  1 - ((cor(obsdat$predmod, obsdat$introduc))^2)/4 #1-obsdat$introduc
+    }
+    total_loglik = log(weights_lkld*(obsdat$predmod^obsdat$resquali)*((1-obsdat$predmod)^(1-obsdat$resquali))) #log(weights_lkld*(obsdat$predmod^obsdat$resquali)*((1-obsdat$predmod)^(1-obsdat$resquali)) /sum(weights_lkld))
     total_loglik[is.infinite(total_loglik)] = -710
 
     if(aim == "est"){
@@ -1107,6 +1109,7 @@ M_step <- function(introd, modnum, prevfit) {
   number_cycle = ob_pred[[1]]$cycle
   
   print(true_coef)
+  print(1-cor(ob_pred[[1]]$predmod, ob_pred[[1]]$introduc)^2)
   list(raw_coef, llmod, modstep, true_coef, number_cycle)
 }
 ```
@@ -1511,7 +1514,7 @@ if(test_method_comp){
     low_use_low_res = setdiff(which(fake_amu < 0.5), low_use_high_res)
     fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
     
-    high_use_low_res = 35 #42 #sample(x = which(fake_amu >= 0.5), size = 1) #NULL
+    high_use_low_res = NULL #42 #sample(x = which(fake_amu >= 0.5), size = 1) #35
     fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
     
     high_use_high_res = setdiff(which(fake_amu >= 0.5), high_use_low_res)
@@ -1754,6 +1757,35 @@ print(tab_aic_ll$AIC_weights[13] /tab_aic_ll$AIC_weights[1])
 ```{r}
 print(tab_aic_ll$AIC_weights[max_AICweight_model] /tab_aic_ll$AIC_weights[13])
 bbmle::anova(lfit[[max_AICweight_model]], lfit[[13]])
+
+```
+
+We plot a figure showing the models in the order of decreasing AIC weight, and the cumulative AIC weight tending to 100%. The variables included for each model are plotted above:
+
+```{r}
+cum_aic_wght = data.frame(mod = 1:24, AICw = l_aic_weights, intr_poss = NA, rec_amu = NA, init_amu = NA, first_samp = NA, prev_samp = NA)
+
+cum_aic_wght[13:24, "intr_poss"] = 0.25
+cum_aic_wght[c(7:12, 19:24), "rec_amu"] = 0.2
+cum_aic_wght[c(4:6, 10:12, 16:18, 22:24), "init_amu"] = 0.15
+cum_aic_wght[seq(2,23,3), "first_samp"] = 0.1
+cum_aic_wght[seq(3,24,3), "prev_samp"] = 0.05
+
+cum_aic_wght = cum_aic_wght[order(cum_aic_wght$AICw, decreasing = T),]
+cum_aic_wght$cum_AICw = cumsum(cum_aic_wght$AICw)
+cum_aic_wght$mod = factor(cum_aic_wght$mod, levels = cum_aic_wght$mod)
+
+cum_aic_wght = melt(cum_aic_wght, id.vars=c("mod", "AICw", "cum_AICw"), variable.name="var", value.name="position")
+
+p = ggplot(data = cum_aic_wght, aes(x = mod, y = cum_AICw, group = 1, na.rm = TRUE))
+p = p + ylim(0,1) + xlab("Models") + ylab("Cumulative AIC weights")
+p = p + theme_bw()
+p = p + geom_line() + geom_point(size = 2)
+p = p + geom_segment(aes(x = as.numeric(mod)-0.5, xend = as.numeric(mod)+0.5, y = position, yend = position, col = var), size = 3)
+p = p + scale_colour_brewer(type="qual", palette=1,
+                           name = "Variables included:",
+                           labels = c("Introductions", "Recent AMU", "Initial AMU", "First sample", "Previous sample"))
+p
 
 ```
 
