@@ -730,28 +730,28 @@ The full model described above is model 24. Models 1 to 23 are simplifications o
 |:----:|:--------------------:|:--------------:|:-----------:|
 |**1** |None                  |None            |None         |
 |**2** |Initial               |None            |None         |
-|**3** |Initial + Previous    |None            |None         |
+|**3** |Previous              |None            |None         |
 |**4** |None                  |Initial         |None         |
 |**5** |Initial               |Initial         |None         |
-|**6** |Initial + Previous    |Initial         |None         |
+|**6** |Previous              |Initial         |None         |
 |**7** |None                  |Recent          |None         |
 |**8** |Initial               |Recent          |None         |
-|**9** |Initial + Previous    |Recent          |None         |
+|**9** |Previous              |Recent          |None         |
 |**10**|None                  |Initial + Recent|None         |
 |**11**|Initial               |Initial + Recent|None         |
-|**12**|Initial + Previous    |Initial + Recent|None         |
+|**12**|Previous              |Initial + Recent|None         |
 |**13**|None                  |None            |Possible     |
 |**14**|Initial               |None            |Possible     |
-|**15**|Initial + Previous    |None            |Possible     |
+|**15**|Previous              |None            |Possible     |
 |**16**|None                  |Initial         |Possible     |
 |**17**|Initial               |Initial         |Possible     |
-|**18**|Initial + Previous    |Initial         |Possible     |
+|**18**|Previous              |Initial         |Possible     |
 |**19**|None                  |Recent          |Possible     |
 |**20**|Initial               |Recent          |Possible     |
-|**21**|Initial + Previous    |Recent          |Possible     |
+|**21**|Previous              |Recent          |Possible     |
 |**22**|None                  |Initial + Recent|Possible     |
 |**23**|Initial               |Initial + Recent|Possible     |
-|**24**|Initial + Previous    |Initial + Recent|Possible     |
+|**24**|Previous              |Initial + Recent|Possible     |
 
 
 ## Useful functions
@@ -768,7 +768,7 @@ We also define `run2_intr` which is a wraper: its output is the function `run2` 
 run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd){
 
   beta = 10 * sigmoid(beta) +1
-  delta = 10 * sigmoid(delta) +1
+  delta = 4 * sigmoid(delta) +1
   
   if(type_mod == "linear"){
     mu = sigmoid(mu)
@@ -819,6 +819,7 @@ run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta,
     
     obsdat$init = (obsdat$init >= thresh_res)
     obsdat$prev = (obsdat$prev >= thresh_res)
+    # obsdat$amu_init = (obsdat$amu_init >0)
     
     obsdat$glm_predmod_intro = eta
     
@@ -827,7 +828,7 @@ run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta,
     
     obsdat$predmod = obsdat$introduc * obsdat$glm_predmod_intro + (1-obsdat$introduc) * obsdat$glm_predmod_nointro #(1-obsdat$introduc) * obsdat$glm_predmod_nointro
     
-    weights_lkld = 1-obsdat$introduc
+    weights_lkld = (1-obsdat$introduc)
     # total_loglik = weights_lkld * log((obsdat$predmod^obsdat$resquali)*((1-obsdat$predmod)^(1-obsdat$resquali))) /1#sum(weights_lkld)
     total_loglik = log(weights_lkld*(obsdat$predmod^obsdat$resquali)*((1-obsdat$predmod)^(1-obsdat$resquali)) /sum(weights_lkld))
     # if(any(is.infinite(total_loglik))){print("CAUTION: Infinite likelihood")}
@@ -1042,7 +1043,7 @@ E_step <- function(observed, params) {
     prob_intro = exp_intro / (exp_intro + exp_nointro)
   }else if(type_mod == "logis"){
     prob_intro = 1 - (r_intro/ (r_intro + r_nointro))
-    # prob_intro = pmax(pmin(prob_intro, 0.99), 0.01)
+    prob_intro = pmax(pmin(prob_intro, 0.99), 0.01)
     # prob_intro = sigmoid(20* (0.5 - (r_intro/ (r_intro + r_nointro))))
     # prob_intro[which(observed < pred_nointro)] = 0
     # prob_intro[which((prob_intro >0.4) & (prob_intro <0.6))] = 0.5
@@ -1075,25 +1076,25 @@ M_step <- function(introd, modnum, prevfit) {
   }else if(modnum == 14){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda1"))
   }else if(modnum == 15){
-    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "alpha",  "beta",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "lambda2"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda1", "alpha",  "beta",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda2"))
   }else if(modnum == 16){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda1",  "lambda2",  "alpha",  "beta", "Sd", "eta"), startvar = c("mu",  "teta",  "delta"))
   }else if(modnum == 17){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda2",  "alpha",  "beta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "teta",  "delta"))
   }else if(modnum == 18){
-    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "alpha",  "beta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda1",  "alpha",  "beta", "Sd", "eta"), startvar = c("mu",  "lambda2",  "teta",  "delta"))
   }else if(modnum == 19){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "alpha",  "beta"))
   }else if(modnum == 20){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda2",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta"))
   }else if(modnum == 21){
-    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda1",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda2",  "alpha",  "beta"))
   }else if(modnum == 22){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda1",  "lambda2", "Sd", "eta"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta"))
   }else if(modnum == 23){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda2", "Sd", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta"))
   }else if(modnum == 24){
-    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("Sd", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"))
+    modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c( "lambda1",  "Sd", "eta"), startvar = c("mu",  "lambda2",  "alpha",  "beta",  "teta",  "delta"))
   }
   #####
   
@@ -1157,8 +1158,8 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.1, max.step=50) {
       param_true_format = output_mstep[[4]]
       cycle_id = output_mstep[[5]]
       introductions_next_step = E_step(observed=obs_res, params=raw_params)
-      fitplot_for_EMalgo(modstep, introductions)
-      fitplot_for_EMalgo(modstep, introductions_next_step)
+      # fitplot_for_EMalgo(modstep, introductions)
+      # fitplot_for_EMalgo(modstep, introductions_next_step)
 
       if (abs(minloglik - old.minloglik) < tol){
         counting_for_convergence = counting_for_convergence +1
@@ -1614,25 +1615,25 @@ if(alread_comp){
   
   lfit[[2]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda2",  "alpha",  "beta",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1"))
   
-  lfit[[3]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "alpha",  "beta",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "lambda2"))
+  lfit[[3]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "alpha",  "beta",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda2"))
   
   lfit[[4]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta", "Sd"), startvar = c("mu", "teta", "delta"))
   
   lfit[[5]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda2",  "alpha",  "beta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "teta",  "delta"))
   
-  lfit[[6]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "alpha",  "beta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta"))
+  lfit[[6]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "alpha",  "beta", "eta", "Sd"), startvar = c("mu",  "lambda2",  "teta",  "delta"))
   
   lfit[[7]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta"))
   
   lfit[[8]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "alpha",  "beta"))
   
-  lfit[[9]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta"))
+  lfit[[9]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda2",  "alpha",  "beta"))
   
   lfit[[10]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta"))
   
   lfit[[11]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda2", "eta", "Sd"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta"))
   
-  lfit[[12]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("eta", "Sd"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"))
+  lfit[[12]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "eta", "Sd"), startvar = c("mu", "lambda2",  "alpha",  "beta",  "teta",  "delta"))
   
   rm(introd)
 }
