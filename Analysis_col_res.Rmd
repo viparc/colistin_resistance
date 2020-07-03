@@ -56,7 +56,7 @@ The objective is to understand the relative contributions of different factors t
 
 * antimicrobial use (AMU)
 * the carriage of colistin resistance in day-old chicks
-* introductions of resistant strains from outside the flock (other flocks, environment, human-poultry transmission)
+* unobserved contamination events
 
 Available data is:
 
@@ -86,6 +86,7 @@ library(rgdal)
 library(ggsn)
 library(ggforce)
 library(dendextend)
+library(mixtools)
 
 ```
 
@@ -94,14 +95,15 @@ library(dendextend)
 We define options for the analysis (explained later):
 
 ```{r}
-ratio_auc = F
 run_shiny = F
-definition_amu = "allab"
+definition_amu = "col"
 amu_model_is_quanti = F
 type_mod = "logis" #"linear"
-alread_comp = T
+effect_recent_amu = "exp_decay"
+alread_comp = F
 test_method_comp = T
-thresh_res = 0.4
+val_eta = 0.999
+conc_used = 1
 
 ```
 
@@ -148,9 +150,15 @@ if(type_res_data == "mic"){
 
 ```
 
-## Resistance data: determine which Optical Density dataset to use
+## Resistance data: determine which colistin concentration to use
 
-This part is computed only in the case we chose growth curves as a measure of resistance in samples. We use `gcur`. Let us first plot the growth curves for each concentration. We remove concentrations 3 and 6, as too few OD were measured for these concentrations.
+This part is computed only in the case we chose growth curves as a measure of resistance in samples. We use `gcur`.
+
+Here, the indicator of colistin resistance is the area between the growth curve under 0 mg/L of colistin (reference) and the growth curve under a non-null concentration of colistin, that we have to determine.
+
+We first remove concentrations 3 and 6, as too few OD were measured for these concentrations.
+
+We plot the OD of all samples for each concentration (2 repetitions). We then plot, for each concentration and all samples (2 repetitions), OD[conc]-OD[conc=0], where OD[conc=0] is the reference OD at concentration 0.
 
 ```{r, fig.width=6, fig.height=4}
 if(type_res_data == "growth_curves"){
@@ -179,23 +187,33 @@ if(type_res_data == "growth_curves"){
   }
   gcur = gcur[which(gcur$Conc. != 0),]
   
-  p = ggplot(data = gcur, aes(x=Time, group=obsID))
-  p = p + ggtitle("Optical Density in all samples for each concentration (in mg/L) - OD at conc=0")
-  p = p + xlab("Time (hours)") + ylab("OD difference")
-  p = p + geom_line(aes(y=value), col="grey")
-  p = p + facet_wrap(~Conc.)
-  p = p + theme_bw()
-  plot(p)
+  p1 = ggplot(data = gcur_before_transfo, aes(x=Time, group=obsID))
+  p1 = p1 + ggtitle("Optical Density in all samples for each concentration (in mg/L)")
+  p1 = p1 + xlab("Time (hours)") + ylab("Optical Density")
+  p1 = p1 + geom_line(aes(y=value), col="grey")
+  p1 = p1 + facet_wrap(~Conc.)
+  p1 = p1 + theme_bw()
+  plot(p1)
   
-  rm(p, concentr)
+  p2 = ggplot(data = gcur, aes(x=Time, group=obsID))
+  p2 = p2 + ggtitle("OD[conc] - OD[conc=0] for all samples")
+  p2 = p2 + xlab("Time (hours)") + ylab("Optical Density difference")
+  p2 = p2 + geom_line(aes(y=value), col="grey")
+  p2 = p2 + facet_wrap(~Conc.)
+  p2 = p2 + theme_bw()
+  plot(p2)
+  
+  rm(p1, p2, concentr)
 }
 ```
 
-Our objective is to use a concentration that offers a distribution of areas under curve (AUC) as spread out as possible. We see that, in concentrations 0 and 0.5, no curve is totally flat, i.e. all samples show some growth. On the contrary, in concentrations 8, 12 and 16, most of the samples show no growth. Therefore, we need to choose between concentrations 1, 2 and 4, that all present a spread range of curves (and thus AUC).
+Our objective is to use a concentration that offers a distribution of the resistance indicator as spread out as possible. We see that, in concentrations 0 and 0.5, no curve is totally flat, i.e. all samples show some growth. On the contrary, in concentrations 8, 12 and 16, most of the samples show no growth. Therefore, we need to choose between concentrations 1, 2 and 4, that all present a spread range of curves, and thus a spread range of resistance indicator value.
 
-For these concentrations (1, 2 and 4), we compute the area under curve (AUC), for each sample, between t=1 hours and t=79 hours.
+For these concentrations (1, 2 and 4), we compute the area between the OD under this concentration and the OD under 0 mg/L of colistin (reference), for each sample.
 
-To measure how much the distributions of AUC are spread out for each concentration, we use the ["van der Eijk's A" statistic](https://en.wikipedia.org/wiki/Multimodal_distribution#van_der_Eijk's_A).  It ranges between -1 (perfect bimodality of the distribution) to +1 (perfect unimodality). A value of 0 corresponds to a uniform distribution. We select the concentration for which this statistic is closest to 0, because we aim to have both a spread distribution, and intermediary values of AUC (between high AUC - resistant samples - and low AUC - not resistant samples). We use package `agrmt`.
+To measure how much the distributions of this indicator (area) are spread out for each concentration, we use the standard deviation, that we want as large as possible. We also use the ["van der Eijk's A" statistic](https://en.wikipedia.org/wiki/Multimodal_distribution#van_der_Eijk's_A).  It ranges between -1 (perfect bimodality of the distribution) to +1 (perfect unimodality). A value of 0 corresponds to a uniform distribution. We select the concentration for which this statistic is closest to 0, because we aim to have both a spread distribution, and intermediary values of indicator. We use package `agrmt`.
+
+Moreover, for each concentration, as the distribution of the indicator is bimodal, we use a GMM with 2 components to determine the threshold for which the probability to be in any of the 2 components is 0.5. This separates samples classified as resistant or sensitive.
 
 ```{r, label="Calculating van der Eijk's A", fig.width=6, fig.height=3}
 if(type_res_data == "growth_curves"){
@@ -214,77 +232,86 @@ if(type_res_data == "growth_curves"){
     list(agreement(table(factor(round(all_auc), levels = (min(round(all_auc)): max(round(all_auc)))))), all_auc, sd(all_auc))
   }
   
-  distrib_auc = data.frame(conc = numeric(0), val = numeric(0))
+  distrib_auc = data.frame(conc = numeric(0), val = numeric(0), thresh = numeric(0))
   for(c in c(1, 2, 4)){
     VdE_A = VdE_A_score(conc=c, t_start=1, t_end=79)
     print(paste("van der Eijk's A for concentration", c, ":"))
     print(VdE_A[[1]])
     print(paste("Standard deviation for concentration", c, ":"))
     print(VdE_A[[3]])
-    distrib_auc = rbind(distrib_auc, data.frame(conc = c, val = VdE_A[[2]]))
+    
+    # Compute value of threshold
+    vect_val = distrib_auc$val[distrib_auc$conc == c]
+    set.seed(78)
+    gmm = normalmixEM(vect_val, k = 2)
+    dif_distrib = function(x){
+      gmm$lambda[1] * dnorm(x, gmm$mu[1], gmm$sigma[1]) - gmm$lambda[2] * dnorm(x, gmm$mu[2], gmm$sigma[2])
+    }
+    thresh_res_this_conc = uniroot(f = dif_distrib, lower=-50, upper=150)$root
+    
+    distrib_auc = rbind(distrib_auc, data.frame(conc = c, val = VdE_A[[2]], thresh = thresh_res_this_conc))
   }
   
-  # Plot distributions of AUC:
+  # Plot distributions of resistance indicator:
   p = ggplot(data = distrib_auc, aes(x = val))
   p = p + geom_histogram(bins = 15, fill = "royalblue4", alpha = 0.5)
   p = p + geom_jitter(aes(y = 3), col = "black", size = 1, width = 0, height = 3)
-  p = p + geom_vline(data = distrib_auc[distrib_auc$conc == 1,], aes(xintercept = -33), size = 1, col = "red", linetype = "dashed")
+  p = p + geom_vline(aes(xintercept = thresh), size = 1, col = "red", linetype = "dashed")
+  # p = p + geom_vline(data = distrib_auc[distrib_auc$conc == 1,], aes(xintercept = -33), size = 1, col = "red", linetype = "dashed")
   p = p + facet_wrap(~conc)
   p = p + ggtitle("Distribution of resistance metric values for each concentration (in mg/L)")
   p = p + xlab("Resistance metric (area between growth curve and reference)") + ylab("Count")
   p = p + theme_bw()
   plot(p)
   
-  # mixtmod = normalmixEM(distrib_auc$val[distrib_auc$conc == 1], k=2)
-  # group1 = mixtmod$lambda[1] * rnorm(5000, mixtmod$mu[1], mixtmod$sigma[1])
-  # group2 = mixtmod$lambda[2] * rnorm(5000, AA$mu[2], AA$sigma[2])
-  # p = ggplot(data = distrib_auc[distrib_auc$conc == 1,], aes(x = val))
-  # p = p + geom_density()
-  # p = p + geom_density(aes(x = group1), col = "red", size = 2)
-  # p = p + geom_density(aes(x = group2), col = "blue", size = 2)
-  # p
-
-  rm(c, VdE_A_score, distrib_auc, VdE_A, p)
+  thresh_res = distrib_auc$thresh[distrib_auc$conc == conc_used]
+  
+  rm(c, VdE_A_score, VdE_A, p)
 }
 ```
 
-There are 2 options:
+```{r}
+# plot_mix_comps <- function(x, mu, sigma, lam) {
+#   lam * dnorm(x, mu, sigma)
+# }
+# 
+# set.seed(1)
+# vect_val <- distrib_auc$val[distrib_auc$conc == 1]
+# mixmdl <- normalmixEM(vect_val, k = 2)
+# 
+# 
+# ggplot(data.frame(x = vect_val)) +
+# geom_histogram(aes(x, ..density..), binwidth = 1, colour = "black", 
+#                fill = "white") +
+# stat_function(geom = "line", fun = plot_mix_comps,
+#               args = list(mixmdl$mu[1], mixmdl$sigma[1], lam = mixmdl$lambda[1]),
+#               colour = "red", lwd = 1.5) +
+# stat_function(geom = "line", fun = plot_mix_comps,
+#               args = list(mixmdl$mu[2], mixmdl$sigma[2], lam = mixmdl$lambda[2]),
+#               colour = "blue", lwd = 1.5) +
+# ylab("Density")
+# 
+# dif_distrib = function(x){
+#   mixmdl$lambda[1] * dnorm(x, mixmdl$mu[1], mixmdl$sigma[1]) - mixmdl$lambda[2] * dnorm(x, mixmdl$mu[2], mixmdl$sigma[2])
+# }
+# 
+# thresh_res = uniroot(f = dif_distrib, lower=-50, upper=150)$root
 
-* `ratio_auc = F`: We select the concentration for which the "van der Eijk's A" statistic is closest to 0, therefore concentration 1 in this case. We average the 2 repetitions of a same sample, and reshape the data to obtain `auc_ob`.
+```
 
-* `ratio_auc = T`: We select as measure of resistance the AUC of the ratio of OD of [Conc. 2]/[Conc. 0] for each sample.
+We select the concentration for which the standard deviation is the highest, or for which the "van der Eijk's A" statistic is closest to 0, therefore concentration 1 in this case. We average the 2 repetitions of a same sample, and reshape the data to obtain `auc_ob`.
 
-In all cases, we standardize the AUC values to range between 0 (lowest value) and 1 (highest value).
+We standardize the AUC values to range between 0 (lowest value) and 1 (highest value).
 
 ```{r}
 
 if(type_res_data == "growth_curves"){
   
-  if(ratio_auc){
-    
-    gcur = gcur[which(gcur$Conc. %in% c(0,2)),]
-
-    samples_with_all_data = intersect(unique(gcur$SampleID[gcur$Conc. == "0"]), unique(gcur$SampleID[gcur$Conc. == "2"]))
-    gcur = gcur[which(gcur$SampleID %in% samples_with_all_data),]
-    
-    gcur = dcast(gcur, SampleID + Conc. + FlockID + SamplPoint + Time ~ Repeat, value.var="value")
-    gcur$mean_repeat = rowMeans(cbind(gcur$`1`, gcur$`2`), na.rm = T)
-    
-    gcur = dcast(gcur, SampleID + FlockID + SamplPoint + Time ~ Conc., value.var="mean_repeat")
-    
-    gcur$od = gcur$`2`/gcur$`0`
-    
-    gcur = gcur[,c("SampleID", "FlockID", "SamplPoint", "Time", "od")]
-    rm(samples_with_all_data)
-    
-  }else{
-    
-    gcur = gcur[which(gcur$Conc. == 1),]
-    
-    gcur = dcast(gcur, SampleID + Conc. + FlockID + SamplPoint + Time ~ Repeat, value.var="value")
-    gcur$od = (gcur$`1` + gcur$`2`)/2
-    gcur = gcur[,c("SampleID", "Conc.", "FlockID", "SamplPoint", "Time", "od")]
-  }
+  gcur = gcur[which(gcur$Conc. == conc_used),]
+  
+  gcur = dcast(gcur, SampleID + Conc. + FlockID + SamplPoint + Time ~ Repeat, value.var="value")
+  gcur$od = (gcur$`1` + gcur$`2`)/2
+  gcur = gcur[,c("SampleID", "Conc.", "FlockID", "SamplPoint", "Time", "od")]
   
   auc_ob = as.data.frame(matrix(NA, nrow = length(unique(gcur$FlockID)), ncol = length(unique(gcur$SamplPoint))))
   dimnames(auc_ob) = list(unique(gcur$FlockID), c("S", "M", "E"))
@@ -301,9 +328,10 @@ if(type_res_data == "growth_curves"){
     }
   }
   
+  thresh_res = (thresh_res - min(auc_ob, na.rm=T))/(max(auc_ob, na.rm=T) - min(auc_ob, na.rm=T))
   auc_ob = (auc_ob - min(auc_ob, na.rm=T))/(max(auc_ob, na.rm=T) - min(auc_ob, na.rm=T))
   
-  # auc_ob = auc_ob[which(! rownames(auc_ob) %in% c("0351", "0381", "0391", "0765")),]
+  auc_ob = auc_ob[which(! rownames(auc_ob) %in% c("0351", "0381", "0391", "0765", "0771")),]
   # mic_data = mic_data[which(! mic_data$ID %in% c("0351", "0381", "0391", "0765")),]
   
   res_data = auc_ob
@@ -423,25 +451,32 @@ title(ylab="Cycles", mgp=c(0,1,0))
 
 for (i in 1:n_cyc){
   
-  rect(xleft = 0.5, xright = 0.5+max(which(! is.na(col_expo[i,]))), ybottom = i-0.5, ytop = i+0.5, col = "bisque", border="bisque")
+  # rect(xleft = 0.5, xright = 0.5+max(which(! is.na(col_expo[i,]))), ybottom = i-0.5, ytop = i+0.5, col = "bisque", border="bisque")
   
-  for (j in 1:ncol(col_expo)){
+  for (j in 1:max(which(! is.na(col_expo[i,])))){
+    
+    rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "bisque", border="grey")
     
     if ((!(is.na(col_expo[i,j]))) & (col_expo[i,j] == 1) & (allab_expo[i,j] == 1)){
-      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "coral3", border="coral3")
+      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "coral3", border="grey")
     }else if ((!(is.na(col_expo[i,j]))) & (col_expo[i,j] == 0) & (allab_expo[i,j] == 1)){
-      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "deepskyblue4", border="deepskyblue4")
+      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "deepskyblue4", border="grey")
     }
 
     if (any(weeks_samp[i,] == j, na.rm=T)){
-      rect(xleft = j-0.1, xright = j+0.1, ybottom = i-0.5, ytop = i+0.5, col = "black", border="black")
+      if (is.finite(res_data[i, which(weeks_samp[i,] == j)])){
+        # rect(xleft = j-0.07, xright = j+0.07, ybottom = i-0.5, ytop = i+0.5, col = "black", border="black")
+        # lines(x = c(j-0.5, j+0.5), y = c(i-0.5, i+0.5), col = "black")
+        # lines(x = c(j-0.5, j+0.5), y = c(i+0.5, i-0.5), col = "black")
+        lines(x = c(j, j), y = c(i-0.5, i+0.5), col = "black", lwd = 2)
+      }
     }
   }
-  lines(x = c(0.5, 0.5+max(which(! is.na(col_expo[i,])))), y = c(i-0.5, i-0.5), col="grey")
-  lines(x = c(0.5, 0.5+max(which(! is.na(col_expo[i,])))), y = c(i+0.5, i+0.5), col="grey")
+  # lines(x = c(0.5, 0.5+max(which(! is.na(col_expo[i,])))), y = c(i-0.5, i-0.5), col="grey")
+  # lines(x = c(0.5, 0.5+max(which(! is.na(col_expo[i,])))), y = c(i+0.5, i+0.5), col="grey")
 }
 
-legend(x=0, y=n_cyc+7, inset=0.5, legend=c("No antimicrobials used", "Antimicrobials used, including colistin", "Non-colistin antimicrobials used"), fill=c("bisque", "coral3", "deepskyblue4"), cex = 0.8, bty = "n")
+legend(x=0, y=n_cyc+7, inset=0.5, legend=c("Antimicrobials used, including colistin", "Non-colistin antimicrobials used", "No antimicrobials used"), fill=c("coral3", "deepskyblue4", "bisque"), cex = 0.8, bty = "n")
 
     
 # Only for figure:
@@ -460,7 +495,7 @@ p2 = p2 + geom_ribbon(data = for_fig_panel[for_fig_panel$Conc. == 1,], aes(x = T
 p2 = p2 + geom_line(col="black", size=1)
 p2 = p2 + geom_label_repel(data = for_fig_panel[for_fig_panel$Time == 70,], xlim = c(10, 11), ylim = c(0.65, 1.4), direction = "y", hjust = 0)
 p2 = p2 + theme_classic() + theme(legend.position="none",
-                             plot.background=element_rect(colour ="black"), 
+                             plot.background=element_rect(colour ="black"),
                              plot.margin = unit(c(0.2, 0.2, 0.1, 0.1), "cm"))
 
 print(p2, vp=viewport(width = 0.3, height = 0.3, x = 0.98, y = 0.38, just = c("right", "bottom")))
@@ -723,26 +758,29 @@ $A_{init,i}(t)$ is the use that occurs at the begining of the cycle (first $\del
 
 $$A_{init,i}(t)=\sum_{j=1}^{\delta}U(j)$$
 
-```{r echo=FALSE, fig.width=7, fig.height=5}
+```{r echo=FALSE, fig.width=5.5, fig.height=5.5}
 metramu = data.frame(x = seq(0,10,0.01), exp = 0.95*exp(-log(20)/(10-6))^seq(10,0,-0.01), step = c(rep(0.3, 451), rep(0, 550)))
 p = ggplot(data=metramu, aes(x=x))
 # p = p + ggtitle("Metric for the past use of antibiotics (Si and Lij)")
-p = p + xlab("Weeks k") + ylab("Effect of antimicrobial use")
-p = p + geom_ribbon(aes(ymin=0, ymax=pmax(exp, step)), alpha=0.3)
+p = p + xlab("Time since beginning of production cycle") + ylab("Effect of antimicrobial use")
+p = p + geom_ribbon(aes(ymin=0, ymax=exp), fill="dodgerblue4", alpha=0.2)
+p = p + geom_ribbon(aes(ymin=0, ymax=step), fill="brown", alpha=0.2)
 p = p + geom_line(aes(y=exp, col="1"), size=1)
 p = p + geom_step(aes(y=step, col="2"), size=1)
 p = p + geom_line(aes(y=0.05), linetype="dashed")
 p = p + geom_line(aes(y=0.95), linetype="dashed")
-p = p + geom_point(aes(x=6, y=0.05), size=4, col="blue")
-p = p + geom_text(aes(x=4.5, y=0.38, label = "delta"), parse = T, size=5, col="red")
-p = p + geom_text(aes(x=0, y=0.38, label = "0"), parse = T, size=5, col="red")
+p = p + geom_point(aes(x=6.1, y=0.05), size=4, col="dodgerblue4")
+p = p + geom_point(aes(x=10, y=0.95), size=4, col="dodgerblue4")
+p = p + geom_text(aes(x=4.5, y=-0.03, label = "delta"), parse = T, size=5, col="brown")
 p = p + geom_text(aes(x=-0.2, y=0.3, label = "theta"), parse = T, size=5, col="black")
-p = p + geom_text(aes(x=6, y=0.15, label = "tij-beta"), parse = T, size=5, col="blue")
-p = p + geom_text(aes(x=10, y=1, label = "tij-1"), parse = T, size=5, col="black")
+p = p + geom_text(aes(x=6.1, y=0.12, label = as.character(expression(paste("t"["ij"]," -",~beta)))), parse = T, size=5, col="dodgerblue4")
+p = p + geom_text(aes(x=10, y=1, label = as.character(expression(paste("t"["ij"]," -1")))), parse = T, size=5, col="dodgerblue4")
 p = p + geom_text(aes(x=-0.4, y=0.05, label = as.character(expression(~epsilon~alpha))), parse = T, size=5, col="black")
+p = p + geom_text(aes(x=-0.2, y=-0.03, label = "0"), parse = T, size=5, col="black")
 p = p + geom_text(aes(x=-0.2, y=0.95, label = "alpha"), parse = T, size=5, col="black")
-p = p + scale_color_manual(name="", values=c("1"="blue", "2"="red"), labels=c("1"="Lij (recent AMU)", "2"="Si (initial AMU)"))
+p = p + scale_color_manual(name="", values=c("1"="dodgerblue4", "2"="brown"), labels=c("1"=expression(paste("L"["ij"]," (recent use)")), "2"=expression(paste("S"["i"]," (initial use)"))))
 p = p + theme_bw()
+p = p + theme(axis.text.x=element_blank(), axis.ticks.x=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank(), legend.position = "top", legend.direction = "vertical")
 p
 
 rm(metramu, p)
@@ -807,11 +845,11 @@ run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta,
     eta = sigmoid(eta)
     Sd = 3 * sigmoid(Sd)
   }else if(type_mod == "logis"){
-    eta = 0.99999999
+    eta = val_eta
     Sd = 1
   }
 
-  obsdat = resamu(nwkseff=beta, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", ignore.nul=F, lag_amu_init=delta, obj="est", expo=definition_amu)
+  obsdat = resamu(nwkseff=beta, quantuse=amu_model_is_quanti, tempo_amu="linear", ignore.nul=F, lag_amu_init=delta, obj="est", expo=definition_amu)
   obsdat = obsdat[! is.na(obsdat$resquanti),]
   obsdat$init[is.na(obsdat$init)] = mean(obsdat$init, na.rm=T) # 0
   obsdat$prev[is.na(obsdat$prev)] = mean(obsdat$prev, na.rm=T) # 0
@@ -856,13 +894,6 @@ run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta,
     
     obsdat$predmod = obsdat$introduc * obsdat$glm_predmod_intro + (1-obsdat$introduc) * obsdat$glm_predmod_nointro #(1-obsdat$introduc) * obsdat$glm_predmod_nointro
     
-    if(sum(intr) == 0){
-      weights_lkld = 1-obsdat$introduc
-    }else{
-      # weights_lkld =  1 - ((cor(obsdat$predmod, obsdat$introduc))^2)/4
-      weights_lkld =  1-obsdat$introduc
-    }
-    # total_loglik = log(weights_lkld*(obsdat$predmod ^ obsdat$resquali)*((1-obsdat$predmod) ^ (1-obsdat$resquali))/sum(weights_lkld))
     total_loglik = (1-obsdat$introduc) * log(obsdat$glm_predmod_nointro ^ obsdat$resquali * ((1-obsdat$glm_predmod_nointro) ^ (1-obsdat$resquali))) + obsdat$introduc * log(obsdat$glm_predmod_intro ^ obsdat$resquali * ((1-obsdat$glm_predmod_intro) ^ (1-obsdat$resquali)))
     
 total_loglik[is.infinite(total_loglik)] = -710
@@ -948,6 +979,8 @@ fitplot = function(fitted_model, intro){
     
     print(paste0("Sensitivity: ", sum((obs_vs_pred[[1]]$predmod >= thresh_res) & (obs_vs_pred[[1]]$resquali))/sum(obs_vs_pred[[1]]$resquali)))
     print(paste0("Specificity: ", sum((obs_vs_pred[[1]]$predmod >= thresh_res) & (obs_vs_pred[[1]]$resquali))/sum(obs_vs_pred[[1]]$predmod >= thresh_res)))
+    
+    as.numeric(obs_vs_pred[[1]]$resquali)
   }
 }
 
@@ -1024,37 +1057,40 @@ rep_est = function(nrep, minusloglrep, methodrep, controlrep, prev_est, fixedvar
 
 ### Implementation of the full E-M algorithm
 
-$$Q(\theta,\theta^t) = E[ln \, P(Y,Z/\theta) \quad /Y,\theta^t]=\sum_{m} E[ln \, P(Y_m,Z_m/\theta) \quad /Y_m,\theta^t]$$
+$$Q(\theta,\theta^t) = E[ln \, P(Y,Z|\theta) \quad |Y,\theta^t]$$
 
-$$Q(\theta,\theta^t) = \sum_{m} [P(Z_m=0/Y_m,\theta^t).ln \, P(Z_m=0,Y_m/\theta) \: + \: P(Z_m=1/Y_m,\theta^t).ln \, P(Z_m=1,Y_m/\theta)]$$
+$$\begin{align*}
+Q(\theta,\theta^t)  &= \sum_{m} E[ln \, P(Y_m,Z_m|\theta) \quad |Y_m,\theta^t] \\
+                    &= \sum_{m} [P(Z_m=0|Y_m,\theta^t).ln \, P(Z_m=0,Y_m|\theta) \: + \: P(Z_m=1|Y_m,\theta^t).ln \, P(Z_m=1,Y_m|\theta)]
+\end{align*}$$
 
 Therefore:
 $$\begin{align*}
-P(Z_m=1/Y_m,\theta^t) &= \frac{P(Z_m=1,Y_m/\theta^t)}{P(Y_m/\theta^t)}\\
-                      &= \frac{P(Z_m=1,Y_m/\theta^t)}{P(Z_m=0,Y_m/\theta^t) \: + \: P(Z_m=1,Y_m/\theta^t)}\\
+P(Z_m=1|Y_m,\theta^t) &= \frac{P(Z_m=1,Y_m|\theta^t)}{P(Y_m|\theta^t)}\\
+                      &= \frac{P(Z_m=1,Y_m|\theta^t)}{P(Z_m=0,Y_m|\theta^t) \: + \: P(Z_m=1,Y_m|\theta^t)}\\
                       &= \frac{\eta^{R_m}.(1-\eta)^{1-R_m}}{M_{m,t}^{R_m}.(1-M_{m,t})^{1-R_m} \: + \: \eta^{R_m}.(1-\eta)^{1-R_m}}
 \end{align*}$$ 
                       
-$$P(Z_m=0/Y_m,\theta^t) = 1-P(Z_m=1/Y_m,\theta^t)$$
+$$P(Z_m=0|Y_m,\theta^t) = 1-P(Z_m=1|Y_m,\theta^t)$$
 
 And:
 
 $$\begin{align*}
-  Q(\theta,\theta^t) &= \sum_{m} [P(Z_m=0/Y_m,\theta^t).ln \, P(Z_m=0,Y_m/\theta) \: + \: P(Z_m=1/Y_m,\theta^t).ln \, P(Z_m=1,Y_m/\theta)]\\
-                     &= \sum_{m} [P(Z_m=0/Y_m,\theta^t).ln \, [P(Z_m=0/Y_m,\theta).P(Y_m/\theta)] \: + \: P(Z_m=1/Y_m,\theta^t).ln \, [P(Z_m=1/Y_m,\theta).P(Y_m/\theta)]]\\
-                     &= \sum_{m} [[ln \, P(Y_m/\theta)].[P(Z_m=0/Y_m,\theta^t)+P(Z_m=1/Y_m,\theta^t)]\\
-                     &\: + \: P(Z_m=0/Y_m,\theta^t).ln \, P(Z_m=0/Y_m,\theta) \: + \: P(Z_m=1/Y_m,\theta^t).ln \, P(Z_m=1/Y_m,\theta)]\\
-                     &= \sum_{m} [ln \, P(Y_m/\theta)] \: + \: H(\theta,\theta^t)\\
+  Q(\theta,\theta^t) &= \sum_{m} [P(Z_m=0|Y_m,\theta^t).ln \, P(Z_m=0,Y_m|\theta) \: + \: P(Z_m=1|Y_m,\theta^t).ln \, P(Z_m=1,Y_m|\theta)]\\
+                     &= \sum_{m} [P(Z_m=0|Y_m,\theta^t).ln \, [P(Z_m=0|Y_m,\theta).P(Y_m|\theta)] \: + \: P(Z_m=1|Y_m,\theta^t).ln \, [P(Z_m=1|Y_m,\theta).P(Y_m|\theta)]]\\
+                     &= \sum_{m} [[ln \, P(Y_m|\theta)].[P(Z_m=0|Y_m,\theta^t)+P(Z_m=1|Y_m,\theta^t)]\\
+                     &\: + \: P(Z_m=0|Y_m,\theta^t).ln \, P(Z_m=0|Y_m,\theta) \: + \: P(Z_m=1|Y_m,\theta^t).ln \, P(Z_m=1|Y_m,\theta)]\\
+                     &= \sum_{m} [ln \, P(Y_m|\theta)] \: + \: H(\theta,\theta^t)\\
                      &= L_{obs}(\theta) \: + \: H(\theta,\theta^t)\\
 \end{align*}$$
 
-$$H(\theta,\theta^t)= \sum_{m} [P(Z_m=0/Y_m,\theta^t).ln \, P(Z_m=0/Y_m,\theta) \: + \: P(Z_m=1/Y_m,\theta^t).ln \, P(Z_m=1/Y_m,\theta)]$$
+$$H(\theta,\theta^t)= \sum_{m} [P(Z_m=0|Y_m,\theta^t).ln \, P(Z_m=0|Y_m,\theta) \: + \: P(Z_m=1|Y_m,\theta^t).ln \, P(Z_m=1|Y_m,\theta)]$$
 
 $$Q(\theta^*,\theta^*)= L_{obs}(\theta^*) \: + \: H(\theta^*,\theta^*)$$
 
 $$IC_{H,Q}=-2Q(\theta^*,\theta^*)+2H(\theta^*,\theta^*)+C^*(\theta^*)$$
 
-$$H(\theta^*,\theta^*)= \sum_{m} [P^{cont}_{m}.ln(P^{cont}_{m})]$$
+$$H(\theta^*,\theta^*)= \sum_{m} [P^{cont}_{m}.ln(P^{cont}_{m}) + (1-P^{cont}_{m}).ln(1-P^{cont}_{m})]$$
 
 #### Function for the E step
 
@@ -1064,7 +1100,7 @@ We first calculate the residuals $r_{intro}^i$ (`r_intro`) and $r_{nointro}^i$ (
 
 The idea is to compute, for each observation, the probability that it is assigned to each of the 2 models:
 
-$$p(R_i \in M_{intro}) = \frac{p(r_{intro}^i/R_i \in M_{intro})}{p(r_{intro}^i/R_i \in M_{intro}) + p(r_{nointro}^i/R_i \in M_{nointro})}$$
+$$p(R_i \in M_{intro}) = \frac{p(r_{intro}^i|R_i \in M_{intro})}{p(r_{intro}^i|R_i \in M_{intro}) + p(r_{nointro}^i|R_i \in M_{nointro})}$$
 
 And:
 
@@ -1086,39 +1122,29 @@ E_step <- function(observed, params, prev_p_intro) {
     sigma = 0.1
   }
 
-  pred_intro = 0.99 #params[["eta"]] #run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
+  pred_intro = run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
 
   pred_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
   
-  # Residuals of observations under models "Intro" and "No intro"
-  r_intro = abs(pred_intro - observed)
-  r_nointro = abs(pred_nointro - observed)
-
-  # Residuals follow a normal distribution
-  exp_intro = exp(- r_intro^2/(2*sigma^2))
-  exp_nointro = exp(- r_nointro^2/(2*sigma^2))
-
-  exp_intro = pmin(0.9999, exp_intro)
-  exp_intro = pmax(0.0001, exp_intro)
-  exp_nointro = pmin(0.9999, exp_nointro)
-  exp_nointro = pmax(0.0001, exp_nointro)
-
   # Probability of "Intro":
   if(type_mod == "linear"){
+    # Residuals of observations under models "Intro" and "No intro"
+    r_intro = abs(pred_intro - observed)
+    r_nointro = abs(pred_nointro - observed)
+    # Residuals follow a normal distribution
+    exp_intro = exp(- r_intro^2/(2*sigma^2))
+    exp_nointro = exp(- r_nointro^2/(2*sigma^2))
+    exp_intro = pmin(0.999, exp_intro)
+    exp_intro = pmax(0.001, exp_intro)
+    exp_nointro = pmin(0.999, exp_nointro)
+    exp_nointro = pmax(0.001, exp_nointro)
     prob_intro = exp_intro / (exp_intro + exp_nointro)
   }else if(type_mod == "logis"){
     observed = as.numeric(observed >= thresh_res)
-    pred_nointro = pmax(pmin(pred_nointro, 0.99), 0.01)
+    pred_intro = pmax(pmin(pred_intro, 0.999), 0.001)
+    pred_nointro = pmax(pmin(pred_nointro, 0.999), 0.001)
     prob_intro = ((pred_intro ^ observed)*((1-pred_intro) ^ (1-observed)))/((pred_nointro ^ observed)*((1-pred_nointro) ^ (1-observed)) + (pred_intro ^ observed)*((1-pred_intro) ^ (1-observed)))
-    # prob_intro = observed*(observed - pred_nointro)#/(observed + pred_nointro) # 1 - (r_intro/ (r_intro + r_nointro))
-    # prob_intro = pmax(pmin(prob_intro, 0.99), 0.01)
-    # prob_intro = sigmoid(20* (0.5 - (r_intro/ (r_intro + r_nointro))))
-    # prob_intro[which(observed < pred_nointro)] = 0
-    # prob_intro[which((prob_intro >0.4) & (prob_intro <0.6))] = 0.5
-    # prob_intro[prob_intro >0.5] = 1
-    # prob_intro[prob_intro <0.5] = 0
   }
-  # prob_intro = exp_intro / (exp_intro + exp_nointro)
 
   prob_intro
 }
@@ -1186,7 +1212,7 @@ We repeat the algorithm several times to make sure the whole space has been expl
 Convergence is defined as: the distance between the likelihood and the former likelihood is less than 1, 3 times in a row.
 
 ```{r}
-EM_algo <- function(modnum, numb_rep_algo=5, tol=0.001, max.step=100000000000) {
+EM_algo <- function(modnum, numb_rep_algo=5, tol=0.001, max.step=100000000000, plot_step=T, init_p = 0.01) {
 
   repetalgo = list()
   repetalgo_minloglik = c()
@@ -1197,7 +1223,7 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.001, max.step=100000000000) {
     step = 0
     minloglik = 10^6
     
-    introductions_next_step = 0.01
+    introductions_next_step = init_p
     raw_params = "none"
     
     obs_res = resamu(obj="est", nwkseff=1, lag_amu_init=1, expo=definition_amu)$resquanti
@@ -1226,9 +1252,10 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.001, max.step=100000000000) {
       param_true_format = output_mstep[[4]]
       cycle_id = output_mstep[[5]]
       introductions_next_step = E_step(observed=obs_res, params=raw_params, prev_p_intro = introductions)
-      # fitplot_for_EMalgo(modstep, introductions)
-      # fitplot_for_EMalgo(modstep, introductions_next_step)
-      
+      if(plot_step){
+        fitplot_for_EMalgo(modstep, introductions)
+      }
+
       if (abs(minloglik - old.minloglik) < tol){
         counting_for_convergence = counting_for_convergence +1
       }else{
@@ -1810,7 +1837,7 @@ We create fake resistance data such that there is a relationship with initial AM
 ```{r, fig.width=7, fig.height=5}
 if(test_method_comp){
   load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_6.rdata")
-  res_data = test_scenario_4[[1]]
+  res_data = test_scenario_6[[1]]
 }else{
   if(type_mod == "linear"){
     
@@ -1930,11 +1957,8 @@ First, we fit models that do not take into account the introductions. For them, 
 ```{r, label="Estimation of the models without introduction"}
 
 if(alread_comp){
-  if(ratio_auc){
-    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp - Ratio [2]-[0]/lfit_", definition_amu,".rdata"))
-  }else{
-    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - Exp - Diff/lfit_", definition_amu, "_isquanti", amu_model_is_quanti, ".rdata"))
-  }
+  
+  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - Exp - Diff/lfit_", definition_amu, "_isquanti", amu_model_is_quanti, ".rdata"))
   
 }else{
   lfit = list()
@@ -1975,11 +1999,8 @@ We repeat the algorithm 5 times (with different seeds) per model, and each maxim
 ```{r, label="E-M algorithm on all models"}
 
 if(alread_comp){
-  if(ratio_auc){
-    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - Qualitative - Exp - Ratio [2]-[0]/resulpar_", definition_amu, "_all.rdata"))
-  }else{
-    load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - Exp - Diff/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_all.rdata"))
-  }
+  
+  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - Exp - Diff/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_all.rdata"))
   
 }else{
   t = as.numeric(Sys.time())
@@ -1987,14 +2008,14 @@ if(alread_comp){
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
   clusterExport(cl, c("thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resulpar_13to21 = parLapply(cl, X=13:21, fun=EM_algo, numb_rep_algo=1)
+  resulpar_13to21 = parLapply(cl, X=13:21, fun=EM_algo, numb_rep_algo=1, plot_step=F)
   stopCluster(cl)
   save(resulpar_13to21, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_13to21.rdata"))
   
   cl<-makeCluster(3)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
   clusterExport(cl, c("thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resulpar_22to24 = parLapply(cl, X=22:24, fun=EM_algo, numb_rep_algo=1)
+  resulpar_22to24 = parLapply(cl, X=22:24, fun=EM_algo, numb_rep_algo=1, plot_step=F)
   stopCluster(cl)
   save(resulpar_22to24, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_22to24.rdata"))
 
@@ -2021,31 +2042,35 @@ $$ W_k = \frac{e^{-\frac{1}{2}.(AIC_k-min(AIC))}}{\sum_{j=1}^{24}(e^{-\frac{1}{2
 where $N$ is the total number of models, and $AIC_k$ is the AIC of model $k$.
 
 ```{r, fig.width=8, fig.height=6}
-l_loglik = unlist(lapply(X = lfit, FUN = logLik))
-l_aic = unlist(lapply(X = lfit, FUN = AIC))
+l_Q_fct = l_H_fct = l_numb_par = c()
+
 for(m in 13:24){
+  l_Q_fct[m-12] = l_Q_fct[m] = -as.numeric(resulpar[[m-12]][[4]])
+  l_numb_par[m-12] = l_numb_par[m] = length(resulpar[[m-12]][[1]]@coef)
+  
   vec_p = resulpar[[m-12]][[3]]
   vec_p[vec_p == 0] = 1e-7
   vec_p[vec_p == 1] = 1-(1e-7)
-  l_aic[m] = l_aic[m] + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+  
+  l_H_fct[m-12] = l_H_fct[m] = sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 }
 
-l_aic_weights = exp(-(l_aic - min(l_aic))/2) / sum(exp(-(l_aic - min(l_aic))/2))
+l_IC_HQ = -2*l_Q_fct + 2*l_H_fct + 2*l_numb_par
 
-tab_aic_ll = data.frame(mod = as.factor(1:24), LogLikelihood = l_loglik, MinAIC = -l_aic, AIC_weights = l_aic_weights)
+tab_aic_ll = data.frame(mod = as.factor(1:24), Q_fct = l_Q_fct, H_fct = l_H_fct, numb_par = l_numb_par, IC_HQ = l_IC_HQ)
 plot_aic_ll = melt(tab_aic_ll, id = "mod")
 
 p = ggplot(data = plot_aic_ll, aes(y = mod))
 p = p + ggtitle("Comparison of the fitted models") + xlab("Indicator value") + ylab("Models")
-p = p + geom_vline(data = subset(plot_aic_ll, variable == "LogLikelihood"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "LogLikelihood"])), linetype = "dashed")
-p = p + geom_vline(data = subset(plot_aic_ll, variable == "MinAIC"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "MinAIC"])), linetype = "dashed")
-p = p + geom_vline(data = subset(plot_aic_ll, variable == "AIC_weights"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "AIC_weights"])), linetype = "dashed")
+# p = p + geom_vline(data = subset(plot_aic_ll, variable == "LogLikelihood"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "LogLikelihood"])), linetype = "dashed")
+# p = p + geom_vline(data = subset(plot_aic_ll, variable == "MinAIC"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "MinAIC"])), linetype = "dashed")
+# p = p + geom_vline(data = subset(plot_aic_ll, variable == "AIC_weights"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "AIC_weights"])), linetype = "dashed")
 p = p + geom_point(aes(x = value), shape=18, size=2)
 p = p + facet_wrap(~variable, scales = "free_x")
 p = ggplotly(p)
 p
 
-rm(p, plot_aic_ll, l_loglik, l_aic)
+rm(p, plot_aic_ll, l_Q_fct, l_H_fct, l_numb_par)
 ```
 
 According to the AIC, the best model is:
@@ -2146,6 +2171,7 @@ max_AICweight_intro_model = max_AICweight_model -12
 prob_intro_farms = data.frame(Farm = resulpar[[max_AICweight_intro_model]][[7]], Prob = resulpar[[max_AICweight_intro_model]][[3]])
 prob_intro_farms$Farm = rownames(weeks_samp)[prob_intro_farms$Farm]
 prob_intro_farms$Farm = substr(prob_intro_farms$Farm, 1, 3)
+prob_intro_farms$Obs_res = as.character(fitplot(fitted_model = lfit[[max_AICweight_model]], intro = resulpar[[max_AICweight_model-12]][[3]]))
 ```
 
 We add GPS information to `prob_intro_farms`.
@@ -2194,7 +2220,7 @@ It is possible to plot the green area around one farm only (as an example).
 Function to compute the Moran's I statistic:
 
 ```{r}
-dist_geo = spDists(x = as.matrix(x = prob_intro_farms[,c("Long", "Lat")]), longlat = T)
+dist_geo = spDists(x = as.matrix(x = prob_intro_farms[! is.na(prob_intro_farms$Prob), c("Long", "Lat")]), longlat = T)
 
 coef_moran = function(k, decay_fun){
   
@@ -2216,7 +2242,7 @@ coef_moran = function(k, decay_fun){
   }
   diag(weight_matrix) = 0
   
-  res = Moran.I(x = prob_intro_farms$Prob, weight = weight_matrix, alternative = "greater")
+  res = Moran.I(x = prob_intro_farms$Prob[! is.na(prob_intro_farms$Prob)], weight = weight_matrix, alternative = "greater")
 
   c(obs = res$observed, expect = res$expected, sd = res$sd, p_val = res$p.value)
 }
@@ -2387,17 +2413,19 @@ library(spdep)
 # prob_intro_farms = stats::aggregate(prob_intro_farms, by = list(prob_intro_farms$Farm), FUN = mean)
 # prob_intro_farms$Farm = prob_intro_farms$Group.1
 
-dist_geo = spDists(x = as.matrix(x = prob_intro_farms[,c("Long", "Lat")]), longlat = T) # Must stay outside the function "local_moran"
+dist_geo = spDists(x = as.matrix(x = prob_intro_farms[! is.na(prob_intro_farms$Prob), c("Long", "Lat")]), longlat = T) # Must stay outside the function "local_moran"
 
 local_moran = function(decay_param, decay_fun, p_val, style_weight){
   
   set.ZeroPolicyOption(TRUE)
   prob_intro_farms$Lat = prob_intro_farms$Lat + runif(length(prob_intro_farms$Lat), 0, 0.00001)
-  prob_intro_farms$scaled_prob = as.numeric(scale(prob_intro_farms$Prob))
+  vec_scaled_prob = as.numeric(scale(prob_intro_farms$Prob[! is.na(prob_intro_farms$Prob)]))
+  prob_intro_farms$scaled_prob = NA
+  prob_intro_farms$scaled_prob[! is.na(prob_intro_farms$Prob)] = vec_scaled_prob
   
   if(decay_fun == "exp"){
     
-    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[,c("Long","Lat")]), d1 = 0, d2 = 1000, longlat = T)
+    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[! is.na(prob_intro_farms$Prob), c("Long","Lat")]), d1 = 0, d2 = 1000, longlat = T)
     weight_matrix = exp(-decay_param * dist_geo)
     list_weight_matrix = split(weight_matrix, rep(1:ncol(weight_matrix), each = 1))
     for(i in 1:length(list_weight_matrix)){list_weight_matrix[[i]] = list_weight_matrix[[i]][-i]}
@@ -2405,7 +2433,7 @@ local_moran = function(decay_param, decay_fun, p_val, style_weight){
     
   }else if(decay_fun == "power"){
     
-    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[,c("Long","Lat")]), d1 = 0, d2 = 1000, longlat = T)
+    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[! is.na(prob_intro_farms$Prob), c("Long","Lat")]), d1 = 0, d2 = 1000, longlat = T)
     weight_matrix = 1/(1+(dist_geo)^decay_param)
     list_weight_matrix = split(weight_matrix, rep(1:ncol(weight_matrix), each = 1))
     for(i in 1:length(list_weight_matrix)){list_weight_matrix[[i]] = list_weight_matrix[[i]][-i]}
@@ -2413,7 +2441,7 @@ local_moran = function(decay_param, decay_fun, p_val, style_weight){
 
   }else if(decay_fun == "linear"){
     
-    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[,c("Long","Lat")]), d1 = 0, d2 = 1000, longlat = T)
+    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[! is.na(prob_intro_farms$Prob), c("Long","Lat")]), d1 = 0, d2 = 1000, longlat = T)
     weight_matrix = apply(X = dist_geo, MARGIN = c(1,2), FUN = function(x) max(0, 1-(x/decay_param)))
     list_weight_matrix = split(weight_matrix, rep(1:ncol(weight_matrix), each = 1))
     for(i in 1:length(list_weight_matrix)){list_weight_matrix[[i]] = list_weight_matrix[[i]][-i]}
@@ -2421,19 +2449,21 @@ local_moran = function(decay_param, decay_fun, p_val, style_weight){
 
   }else if(decay_fun == "next_neighbor"){
     
-    neighbors = knn2nb(knearneigh(x = as.matrix(prob_intro_farms[,c("Long","Lat")]), k = decay_param, longlat = T))
+    neighbors = knn2nb(knearneigh(x = as.matrix(prob_intro_farms[! is.na(prob_intro_farms$Prob), c("Long","Lat")]), k = decay_param, longlat = T))
     listw_for_test = nb2listw(neighbors, style = style_weight)
     
   }else if(decay_fun == "thresh"){
     
-    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[,c("Long","Lat")]), d1 = 0, d2 = decay_param, longlat = T)
+    neighbors = dnearneigh(x = as.matrix(prob_intro_farms[! is.na(prob_intro_farms$Prob), c("Long","Lat")]), d1 = 0, d2 = decay_param, longlat = T)
     listw_for_test = nb2listw(neighbors, style = style_weight)
   }
 
-  p.val.moran = moran.test(x = prob_intro_farms$scaled_prob, listw = listw_for_test)$p.value
-  res.local.moran = localmoran(x = prob_intro_farms$scaled_prob, listw = listw_for_test)
-  prob_intro_farms$lag = lag.listw(listw_for_test, prob_intro_farms$scaled_prob)
-  prob_intro_farms$pval = res.local.moran[,5]
+  p.val.moran = moran.test(x = vec_scaled_prob, listw = listw_for_test)$p.value
+  res.local.moran = localmoran(x = vec_scaled_prob, listw = listw_for_test)
+  prob_intro_farms$lag = NA
+  prob_intro_farms$lag[! is.na(prob_intro_farms$Prob)] = lag.listw(listw_for_test, vec_scaled_prob)
+  prob_intro_farms$pval = NA
+  prob_intro_farms$pval[! is.na(prob_intro_farms$Prob)] = res.local.moran[,5]
   
   prob_intro_farms$pval_cat[prob_intro_farms$pval >= 0.1] = ">0.1"
   prob_intro_farms$pval_cat[prob_intro_farms$pval < 0.1] = "<0.1"
@@ -2452,11 +2482,12 @@ local_moran = function(decay_param, decay_fun, p_val, style_weight){
   p1 = p1 + xlab("Longitude") + ylab("Latitude")
   p1 = p1  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
   p1 = p1 + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
-  p1 = p1 + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = cluster), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
+  set.seed(78)
+  p1 = p1 + geom_jitter(data = prob_intro_farms[! is.na(prob_intro_farms$Prob),], aes(x = Long, y = Lat, fill = cluster), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
   p1 = p1 + ggsn::scalebar(dist = 5, location = "bottomleft", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
-  # p1 = p1 + scale_fill_manual("Cluster:", values = c("High-high (p<0.05)"="red", "Low-low (p<0.05)"="blue", "High-high (p<0.1)"="lightpink", "Low-low (p<0.1)"="skyblue2", "High-low"="forestgreen", "Low-high"="forestgreen", "p>0.1"="white"))
-  p1 = p1 + scale_fill_manual("Cluster:", values = c("High-high (p<0.05)"="red", "Low-low (p<0.05)"="blue", "High-high (p<0.1)"="lightpink", "Low-low (p<0.1)"="skyblue2", "High-low"="forestgreen", "Low-high"="forestgreen", "Not significant"="white"))
-  p1 = p1 + theme(legend.position = "top")
+  # p1 = p1 + scale_fill_manual("Cluster:", values = c("High-high (p<0.05)"="red", "Low-low (p<0.05)"="dodgerblue", "High-high (p<0.1)"="lightpink", "Low-low (p<0.1)"="skyblue2", "High-low"="forestgreen", "Low-high"="forestgreen", "p>0.1"="white"))
+  p1 = p1 + scale_fill_manual("Cluster:", values = c("High-high (p<0.05)"="red", "Low-low (p<0.05)"="dodgerblue", "High-high (p<0.1)"="lightpink", "Low-low (p<0.1)"="skyblue2", "High-low"="forestgreen", "Low-high"="forestgreen", "Not significant"="white"))
+  p1 = p1 + theme(legend.position = "top", legend.direction = "vertical")
   p1 = p1 + blank()
 
   p2 = ggplot(data = prob_intro_farms, aes(x = scaled_prob, y = lag, fill = cluster))
@@ -2527,16 +2558,42 @@ library(ggpubr)
 pA = ggplot()
 pA = pA  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
 pA = pA + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
+set.seed(78)
 pA = pA + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
-pA = pA + scale_fill_gradient2(name = "Probability of contamination:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
-pA = pA + scale_alpha_continuous(name = "Value in the weight matrix:", range = c(0,1))
+# pA = pA + scale_fill_gradient2(name = "Probability of contamination:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
+# pA = pA + scale_alpha_continuous(name = "Value in the weight matrix:", range = c(0,1))
 pA = pA + ggsn::scalebar(dist = 5, location = "bottomleft", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
 pA = pA + theme(legend.position = "top")
 pA = pA + blank()
 
-pB = local_moran(decay_param = 1, decay_fun = "exp", p_val = 0.05, style_weight = "W")[[2]]
+pB = local_moran(decay_param = 2.3, decay_fun = "thresh", p_val = 0.05, style_weight = "W")[[2]]
 
-com_plot = ggarrange(pA, pB, labels = c("A", "B"))
+pC = ggplot()
+pC = pC  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
+pC = pC + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
+set.seed(78)
+pC = pC + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Obs_res), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
+pC = pC + scale_fill_manual(name = "Observed resistance:", values = c("0" = "dodgerblue", "1" = "red"), labels = c("0" = "Sensitive", "1" = "Resistant"))
+pC = pC + ggsn::scalebar(dist = 5, location = "bottomleft", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
+pC = pC + theme(legend.position = "top", legend.direction = "vertical")
+pC = pC + blank()
+
+prob_intro_farms$categ = "Source"
+prob_intro_farms$categ[which(prob_intro_farms$Prob < 0.25)] = "None"
+prob_intro_farms$categ[which(prob_intro_farms$Prob > 0.75)] = "Sink"
+
+pD = ggplot()
+pD = pD  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
+pD = pD + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
+set.seed(78)
+pD = pD + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = categ), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
+# pD = pD + scale_fill_manual(name = "Observed resistance:", values = c("0" = "dodgerblue", "1" = "red"), labels = c("0" = "Sensitive", "1" = "Resistant"))
+pD = pD + ggsn::scalebar(dist = 5, location = "bottomleft", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
+pD = pD + theme(legend.position = "top", legend.direction = "vertical")
+pD = pD + blank()
+
+
+com_plot = ggarrange(pC, pA, pB, pD, nrow = 2, ncol = 2, labels = c("A", "B", "C"))
 plot(com_plot)
 
 ```
