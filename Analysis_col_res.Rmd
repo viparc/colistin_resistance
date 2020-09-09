@@ -103,8 +103,8 @@ type_mod = "logis" #"linear"
 effect_recent_amu = "step"
 alread_comp = F
 test_method_comp = F
-val_eta = 0.999
-conc_used = 1
+almost_one = 0.999
+conc_used = 2
 
 ```
 
@@ -577,7 +577,7 @@ This function is useful to:
 
 ```{r}
 
-resamu = function(nwkseff, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", ignore.nul=F, lag_amu_init, obj="plot", expo, var_to_plot = "amu_t"){
+resamu = function(nwkseff, quantuse, tempo_amu, ignore.nul=F, lag_amu_init, obj="plot", expo, var_to_plot = "amu_t"){
   obtab = data.frame(cycle=NA, amu_init=NA, amu_t=NA, resquanti=NA, age=NA, init=NA, prev=NA, end=NA)
   for(cyc_i in 1:n_cyc){
     for(time_i in 2:3){
@@ -620,9 +620,9 @@ resamu = function(nwkseff, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", 
       
       amu_t = sum(amu_t)
       
-      if(lag_amu_init > last_amu_week_consid){
-        lag_amu_init = last_amu_week_consid
-      }
+      # if(lag_amu_init > last_amu_week_consid){
+      #  lag_amu_init = last_amu_week_consid
+      # }
       
       if(quantuse){
         amu_init = c(use_quanti[cyc_i, (1:floor(lag_amu_init))], (lag_amu_init - floor(lag_amu_init)) * use_quanti[cyc_i, ceiling(lag_amu_init)])
@@ -638,7 +638,7 @@ resamu = function(nwkseff, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", 
   obtab = obtab[-1,]
   
   if(ignore.nul){
-    obtab = obtab[which((obtab$amu_init + obtab$amu_t) != 0),]
+    obtab = obtab[which(obtab[,var_to_plot] != 0),]
   }
   obtab$cycle = as.factor(obtab$cycle)
   
@@ -647,8 +647,10 @@ resamu = function(nwkseff, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", 
   if(obj == "plot"){
     p = ggplot(data=obtab, aes(x=obtab[,var_to_plot], y=resquanti, col=init))
     p = p + ylab("Measure of resistance")
+    p = p + xlab(var_to_plot)
     p = p + ggtitle(paste0("Pearson correlation between recent AMU and the measure of resistance: ", round(cor(obtab$amu_t, obtab$resquanti, use="complete.obs"), 3)))
-    p = p + geom_point()
+    set.seed(78)
+    p = p + geom_jitter(height = 0.25, width = 0)
     p = p + geom_hline(yintercept = thresh_res, linetype="dashed", col="grey")
     p = p + scale_color_gradient(low = "red", high = "blue")
     # p = ggplotly(p)
@@ -660,22 +662,25 @@ resamu = function(nwkseff, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", 
 
 ```
 
-Here, either we run an interactive Shiny app, or we plot a simple graph showing on the y-axis the measured resistance, and on the x-axis the AMU (qualitative, all classes) in the last 3 days before each sampling, with an exponential decay of the effect of antibiotics. The color is the value of resistance in the initial sample of the production cycle (week 1). This is to observe the graphical association between resistance and AMU, and the group of observations for which resistance is high but AMU is low. For the last ones, we want to test if this high resistance could be explained by events of contamination.
+Here, either we run an interactive Shiny app, or we plot a simple graph showing on the y-axis the measured resistance, and on the x-axis the AMU. The color is the value of resistance in the initial sample of the production cycle (week 1). This is to observe the graphical association between resistance and AMU, and the group of observations for which resistance is high but AMU is low. For the last ones, we want to test if this high resistance could be explained by events of contamination.
 
 ```{r, fig.width=7, fig.height=5}
 ui <- fluidPage({
   titlePanel("Correlation between past use and the measure of resistance")
   sidebarLayout(
     sidebarPanel(
+      selectInput("var_to_plot",
+                  "Category of AMU to take into account:",
+                  c("amu_t", "amu_init")),
       sliderInput("nwkseff",
-                  paste0("Number of weeks of past use to take into account (beta):"),
-                  min=1,
-                  max=25,
-                  value=3),
+                  paste0("Number of weeks of past use to take into account on top of the last one (beta):"),
+                  min=0,
+                  max=4,
+                  value=1),
       sliderInput("lag_amu_init",
                   "Number of first weeks of the cycle with permanent effect of use (delta):",
                   min=1,
-                  max=15,
+                  max=5,
                   value=3),
       selectInput("tempo_amu",
                   "Temporal effect of AMU:",
@@ -705,7 +710,7 @@ server <- function(input, output){
     # filter the data by the input and save into new object
     # the input id must be the same as the UI object
     # plot
-    resamu(nwkseff=input$nwkseff, lag_amu_init=input$lag_amu_init, expo=input$expo, quantuse=input$quantuse, tempo_amu=input$tempo_amu, ignore.nul=input$ignore.nul)
+    resamu(nwkseff=input$nwkseff, lag_amu_init=input$lag_amu_init, expo=input$expo, quantuse=input$quantuse, tempo_amu=input$tempo_amu, ignore.nul=input$ignore.nul, var_to_plot=input$var_to_plot)
   })
 }
 
@@ -831,7 +836,7 @@ run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta,
 
   beta = 4 * sigmoid(beta)
   delta = 4 * sigmoid(delta) +1
-  eta = val_eta
+  eta = almost_one
 
   obsdat = resamu(nwkseff=beta, quantuse=amu_model_is_quanti, tempo_amu=effect_recent_amu, ignore.nul=F, lag_amu_init=delta, obj="est", expo=definition_amu)
   # obsdat = obsdat[! is.na(obsdat$resquanti),]
@@ -840,11 +845,11 @@ run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta,
   obsdat$introduc = intr
 
   obsdat$glm_predmod_intro = eta
-  # obsdat$glm_predmod_intro = pmax(pmin(obsdat$glm_predmod_intro, 0.999), 0.001)
+  # obsdat$glm_predmod_intro = pmax(pmin(obsdat$glm_predmod_intro, almost_one), 1-almost_one)
   
   obsdat$glm_predmod_nointro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init
   obsdat$glm_predmod_nointro = pracma::sigmoid(obsdat$glm_predmod_nointro)
-  # obsdat$glm_predmod_nointro = pmax(pmin(obsdat$glm_predmod_nointro, 0.999), 0.001)
+  # obsdat$glm_predmod_nointro = pmax(pmin(obsdat$glm_predmod_nointro, almost_one), 1-almost_one)
   
   obsdat$predmod = obsdat$introduc * obsdat$glm_predmod_intro + (1-obsdat$introduc) * obsdat$glm_predmod_nointro
   
@@ -1054,8 +1059,8 @@ E_step <- function(observed, params, prev_p_intro) {
   pred_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
   
   # Probability of "Intro":
-  pred_intro = pmax(pmin(pred_intro, 0.999), 0.001)
-  pred_nointro = pmax(pmin(pred_nointro, 0.999), 0.001)
+  pred_intro = pmax(pmin(pred_intro, almost_one), 1-almost_one)
+  pred_nointro = pmax(pmin(pred_nointro, almost_one), 1-almost_one)
   prob_intro = ((pred_intro ^ observed)*((1-pred_intro) ^ (1-observed)))/((pred_nointro ^ observed)*((1-pred_nointro) ^ (1-observed)) + (pred_intro ^ observed)*((1-pred_intro) ^ (1-observed)))
 
   prob_intro
@@ -1137,7 +1142,7 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.01, max.step=100000000000, pl
     
     raw_params = "none"
     
-    obs_res = resamu(obj="est", nwkseff=1, lag_amu_init=1, expo=definition_amu)$resquanti
+    obs_res = resamu(obj="est", nwkseff=1, lag_amu_init=1, expo=definition_amu, quantuse=amu_model_is_quanti, tempo_amu=effect_recent_amu)$resquanti
     obs_res = obs_res[! is.na(obs_res)]
     
     introductions_next_step = init_p
@@ -1729,7 +1734,7 @@ if(alread_comp){
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("effect_recent_amu","val_eta","thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("effect_recent_amu","almost_one","thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resulpar = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
   stopCluster(cl)
 
@@ -1829,32 +1834,27 @@ bbmle::anova(resulpar[[best_model]][[1]], resulpar[[1]][[1]])
 We plot a figure showing the models in the order of decreasing AIC weight, and the cumulative AIC weight tending to 100%. The variables included for each model are plotted above:
 
 ```{r}
-cum_aic_wght = data.frame(mod = 1:24, AICw = l_aic_weights, intr_poss = NA, rec_amu = NA, init_amu = NA, first_samp = NA, prev_samp = NA)
+val_ICHQ = data.frame(mod = 1:12, IC_HQ = l_IC_HQ, rec_amu = NA, init_amu = NA, first_samp = NA, prev_samp = NA)
 
-cum_aic_wght[13:24, "intr_poss"] = 0.25
-cum_aic_wght[c(7:12, 19:24), "rec_amu"] = 0.2
-cum_aic_wght[c(4:6, 10:12, 16:18, 22:24), "init_amu"] = 0.15
-cum_aic_wght[seq(2,23,3), "first_samp"] = 0.1
-cum_aic_wght[seq(3,24,3), "prev_samp"] = 0.05
+gap_minmax = max(l_IC_HQ) - min(l_IC_HQ)
+val_ICHQ[7:12, "rec_amu"] = min(l_IC_HQ) - gap_minmax/20
+val_ICHQ[c(4:6, 10:12), "init_amu"] = min(l_IC_HQ) - 2 * gap_minmax/20
+val_ICHQ[seq(2,11,3), "first_samp"] = min(l_IC_HQ) - 3 * gap_minmax/20
+val_ICHQ[seq(3,12,3), "prev_samp"] = min(l_IC_HQ) - 4 * gap_minmax/20
 
-cum_aic_wght = cum_aic_wght[order(cum_aic_wght$AICw, decreasing = T),]
-cum_aic_wght$cum_AICw = cumsum(cum_aic_wght$AICw)
-cum_aic_wght$mod = factor(cum_aic_wght$mod, levels = cum_aic_wght$mod)
+val_ICHQ = val_ICHQ[order(val_ICHQ$IC_HQ, decreasing = F),]
+val_ICHQ$mod = factor(val_ICHQ$mod, levels = val_ICHQ$mod)
 
-cum_aic_wght = melt(cum_aic_wght, id.vars=c("mod", "AICw", "cum_AICw"), variable.name="var", value.name="position")
+val_ICHQ = melt(val_ICHQ, id.vars=c("mod", "IC_HQ"), variable.name="var", value.name="position")
 
-val_line = 0.95
-
-p = ggplot(data = cum_aic_wght, aes(x = mod, y = cum_AICw, group = 1, na.rm = TRUE))
-p = p + ylim(0,1) + xlab("Models") + ylab("Cumulative AIC weights")
+p = ggplot(data = val_ICHQ, aes(x = mod, y = IC_HQ, group = 1, na.rm = TRUE))
+p = p + xlab("Models") + ylab(bquote(IC['H,Q']))
 p = p + theme_bw()
 p = p + geom_line() + geom_point(size = 2)
-p = p + geom_hline(yintercept = val_line, col = "brown3", size = 1, linetype = "dashed")
-p = p + geom_label(x = 12, y = val_line, label = val_line, col = "brown3", size = 3.5)
 p = p + geom_segment(aes(x = as.numeric(mod)-0.5, xend = as.numeric(mod)+0.5, y = position, yend = position, col = var), size = 3)
 p = p + scale_colour_brewer(type="qual", palette=1,
                            name = "Variables included:",
-                           labels = c("Introductions", "Recent AMU", "Initial AMU", "First sample", "Previous sample"))
+                           labels = c("Recent AMU", "Initial AMU", "First sample", "Previous sample"))
 p
 
 ```
@@ -2127,7 +2127,7 @@ library(spdep)
 
 dist_geo = spDists(x = as.matrix(x = prob_intro_farms[! is.na(prob_intro_farms$Prob), c("Long", "Lat")]), longlat = T) # Must stay outside the function "local_moran"
 
-local_moran = function(decay_param, decay_fun, p_val, style_weight){
+local_moran = function(decay_param, decay_fun, p_val, style_weight, vis_spat_weight=T){
   
   set.ZeroPolicyOption(TRUE)
   prob_intro_farms$Lat = prob_intro_farms$Lat + runif(length(prob_intro_farms$Lat), 0, 0.00001)
@@ -2189,10 +2189,36 @@ local_moran = function(decay_param, decay_fun, p_val, style_weight){
   prob_intro_farms$cluster[prob_intro_farms$pval_cat != "<0.05"] = "Not significant"
   # prob_intro_farms$cluster[prob_intro_farms$pval_cat != ">0.1"] = "p>0.1"
   
+  # To visualize spatial weighting:
+  if(vis_spat_weight){
+    heat_map_lat = seq(min(prob_intro_farms$Lat)-0.035, max(prob_intro_farms$Lat)+0.035, 0.005)
+    heat_map_long = seq(min(prob_intro_farms$Long)-0.035, max(prob_intro_farms$Long)+0.035, 0.005)
+    heat_map_grid = expand.grid(heat_map_long, heat_map_lat)
+    colnames(heat_map_grid) = c("Long", "Lat")
+    heat_map_grid$decay = 0
+
+    ref_point = 21
+    dist_this_ref = spDistsN1(pts = as.matrix(heat_map_grid[,c("Long", "Lat")]), pt = as.numeric(prob_intro_farms[ref_point, c("Long", "Lat")]), longlat = T)
+    
+    if(decay_fun == "exp"){
+      heat_map_grid$decay = exp(-decay_param * dist_this_ref)
+    }else if(decay_fun == "power"){
+      heat_map_grid$decay = 1/(1+dist_this_ref^decay_param)
+    }else if(decay_fun == "thresh"){
+      heat_map_grid$decay = as.numeric(dist_this_ref <= decay_param)
+    }else if(decay_fun == "linear"){
+      heat_map_grid$decay = -decay_param*dist_this_ref
+      heat_map_grid$decay = pmax(0, 1-(dist_this_ref/decay_param))
+    }
+  }
   
   p1 = ggplot()
   p1 = p1 + xlab("Longitude") + ylab("Latitude")
   p1 = p1  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
+  if(vis_spat_weight & (decay_fun != "next_neighbor")){
+    p1 = p1 + geom_tile(data = heat_map_grid, aes(x = Long, y = Lat, alpha = decay), fill = "forestgreen")
+    p1 = p1 + scale_alpha_continuous(name = "Value in the weight matrix:", range = c(0,1))
+  }
   p1 = p1 + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
   set.seed(78)
   p1 = p1 + geom_jitter(data = prob_intro_farms[! is.na(prob_intro_farms$Prob),], aes(x = Long, y = Lat, fill = cluster), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
