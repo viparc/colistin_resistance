@@ -87,6 +87,7 @@ library(ggsn)
 library(ggforce)
 library(dendextend)
 library(mixtools)
+library(ggpubr)
 
 ```
 
@@ -96,12 +97,12 @@ We define options for the analysis (explained later):
 
 ```{r}
 run_shiny = F
-definition_amu = "col"
+definition_amu = "allab"
 amu_model_is_quanti = F
 type_mod = "logis" #"linear"
-effect_recent_amu = "exp_decay"
+effect_recent_amu = "step"
 alread_comp = F
-test_method_comp = T
+test_method_comp = F
 val_eta = 0.999
 conc_used = 1
 
@@ -181,9 +182,6 @@ if(type_res_data == "growth_curves"){
     
     gcur$value[gcur$Conc. == concentr] = gcur$value[gcur$Conc. == concentr] - rep(gcur$value[gcur$Conc. == 0], each=2)
     
-    # mean_this_time_conc_0 = rep(aggregate(gcur[gcur$Conc. == 0, c("Time", "value")], by = list(gcur$Time[gcur$Conc. == 0]), FUN = mean)$value, each = sum((gcur$Time == 1)&(gcur$Conc. == concentr)))
-    # gcur$value[gcur$Conc. == concentr] = gcur$value[gcur$Conc. == concentr] - mean_this_time_conc_0
-    
   }
   gcur = gcur[which(gcur$Conc. != 0),]
   
@@ -203,6 +201,12 @@ if(type_res_data == "growth_curves"){
   p2 = p2 + theme_bw()
   plot(p2)
   
+  gcur = dcast(gcur, SampleID + Conc. + FlockID + SamplPoint + Time ~ Repeat, value.var="value")
+  gcur$od = (gcur$`1` + gcur$`2`)/2
+  gcur = gcur[,c("SampleID", "Conc.", "FlockID", "SamplPoint", "Time", "od")]
+  
+  gcur = gcur[! gcur$FlockID %in% c("0351", "0381", "0391", "0765", "0771"),]
+  
   rm(p1, p2, concentr)
 }
 ```
@@ -215,25 +219,28 @@ To measure how much the distributions of this indicator (area) are spread out fo
 
 Moreover, for each concentration, as the distribution of the indicator is bimodal, we use a GMM with 2 components to determine the threshold for which the probability to be in any of the 2 components is 0.5. This separates samples classified as resistant or sensitive.
 
-```{r, label="Calculating van der Eijk's A", fig.width=6, fig.height=3}
+```{r, label="Calculating van der Eijk's A", fig.width=11.5, fig.height=3.5}
 if(type_res_data == "growth_curves"){
   
   VdE_A_score = function(conc, t_start, t_end){
     
-    all_auc = c()
-    for(ts in unique(gcur$obsID)){
-      if(length(seq(t_start,t_end)) == length(gcur$value[which((gcur$Time %in% seq(t_start,t_end)) & (gcur$Conc. == conc) & (gcur$obsID == ts))])){
-        all_auc = c(all_auc, trapz(x = seq(t_start,t_end), y = gcur$value[which((gcur$Time %in% seq(t_start,t_end)) & (gcur$Conc. == conc) & (gcur$obsID == ts))]))
+    all_val = c()
+    for(ts in unique(gcur$SampleID)){
+      if(length(seq(t_start,t_end)) == length(gcur$od[which((gcur$Time %in% seq(t_start,t_end)) & (gcur$Conc. == conc) & (gcur$SampleID == ts))])){
+        all_val = c(all_val, trapz(x = seq(t_start,t_end), y = gcur$od[which((gcur$Time %in% seq(t_start,t_end)) & (gcur$Conc. == conc) & (gcur$SampleID == ts))]))
       }else{
-        print(paste0("Problematic number of repetitions for obsID=", ts, " (concentration ", conc, ")."))
+        print(paste0("Problematic number of repetitions for SampleID=", ts, " (concentration ", conc, ")."))
       }
     }
     
-    list(agreement(table(factor(round(all_auc), levels = (min(round(all_auc)): max(round(all_auc)))))), all_auc, sd(all_auc))
+    list(agreement(table(factor(round(all_val), levels = (min(round(all_val)): max(round(all_val)))))), all_val, sd(all_val))
   }
   
-  distrib_auc = data.frame(conc = numeric(0), val = numeric(0), thresh = numeric(0))
-  for(c in c(1, 2, 4)){
+  dnorm_lambda = function(x, par_mu, par_sigma, par_lambda){
+    par_lambda * dnorm(x, par_mu, par_sigma)
+  }
+  
+  distr_ind = function(c){
     VdE_A = VdE_A_score(conc=c, t_start=1, t_end=79)
     print(paste("van der Eijk's A for concentration", c, ":"))
     print(VdE_A[[1]])
@@ -241,67 +248,51 @@ if(type_res_data == "growth_curves"){
     print(VdE_A[[3]])
     
     # Compute value of threshold
-    vect_val = distrib_auc$val[distrib_auc$conc == c]
+    vect_val = VdE_A[[2]]
     set.seed(78)
     gmm = normalmixEM(vect_val, k = 2)
     dif_distrib = function(x){
-      gmm$lambda[1] * dnorm(x, gmm$mu[1], gmm$sigma[1]) - gmm$lambda[2] * dnorm(x, gmm$mu[2], gmm$sigma[2])
+      log(dnorm_lambda(x, gmm$mu[1], gmm$sigma[1], gmm$lambda[1]) / dnorm_lambda(x, gmm$mu[2], gmm$sigma[2], gmm$lambda[2]))
     }
-    thresh_res_this_conc = uniroot(f = dif_distrib, lower=-50, upper=150)$root
+    thresh_res_this_conc = uniroot(f = dif_distrib, lower=-40, upper=-30)$root
+
+    # Plot distributions of resistance indicator:
+    p = ggplot(data = data.frame(x = VdE_A[[2]]), aes(x=x))
+    p = p + geom_histogram(aes(y = ..density..), bins = 12, fill = "royalblue4", alpha = 0.5)
+    p = p + stat_function(geom = "line", fun = dnorm_lambda,
+                          args = list(par_mu=gmm$mu[1], par_sigma=gmm$sigma[1], par_lambda=gmm$lambda[1]),
+                          colour = "#d95f02", lwd = 0.75)
+    p = p + stat_function(geom = "line", fun = dnorm_lambda,
+                          args = list(par_mu=gmm$mu[2], par_sigma=gmm$sigma[2], par_lambda=gmm$lambda[2]),
+                          colour = "#1b9e77", lwd = 0.75)
+    set.seed(78)
+    p = p + geom_jitter(aes(y = 0.015, col = (x <= thresh_res_this_conc)), size = 1, width = 0, height = 0.015)
+    p = p + geom_vline(xintercept = thresh_res_this_conc, col = "black", linetype = "dashed")
+    p = p + geom_text(aes(x = (min(x) + thresh_res_this_conc)/2, y = 0.062, label = "Sensitive"), col = "#d95f02", size = 4)
+    p = p + geom_text(aes(x = (max(x) + thresh_res_this_conc)/2, y = 0.062, label = "Resistant"), col = "#1b9e77", size = 4)
+    p = p + scale_color_manual(name = "", values = c("#1b9e77", "#d95f02"), labels = c("Sensitive", "Resistant"))
+    p = p + ggtitle(paste0(c, " mg/L"))
+    p = p + xlab("Resistance metric") + ylab("Density")
+    p = p + theme_bw()
     
-    distrib_auc = rbind(distrib_auc, data.frame(conc = c, val = VdE_A[[2]], thresh = thresh_res_this_conc))
+    list(p, thresh_res_this_conc)
+
   }
   
-  # Plot distributions of resistance indicator:
-  p = ggplot(data = distrib_auc, aes(x = val))
-  p = p + geom_histogram(bins = 15, fill = "royalblue4", alpha = 0.5)
-  p = p + geom_jitter(aes(y = 3), col = "black", size = 1, width = 0, height = 3)
-  p = p + geom_vline(aes(xintercept = thresh), size = 1, col = "red", linetype = "dashed")
-  # p = p + geom_vline(data = distrib_auc[distrib_auc$conc == 1,], aes(xintercept = -33), size = 1, col = "red", linetype = "dashed")
-  p = p + facet_wrap(~conc)
-  p = p + ggtitle("Distribution of resistance metric values for each concentration (in mg/L)")
-  p = p + xlab("Resistance metric (area between growth curve and reference)") + ylab("Count")
-  p = p + theme_bw()
-  plot(p)
+  p1 = distr_ind(1)[[1]]
+  p2 = distr_ind(2)[[1]]
+  p3 = distr_ind(4)[[1]]
+  plot(ggarrange(p1, p2, p3, ncol = 3, common.legend=T, legend="none"))
   
-  thresh_res = distrib_auc$thresh[distrib_auc$conc == conc_used]
+  thresh_res = distr_ind(conc_used)[[2]]
   
-  rm(c, VdE_A_score, VdE_A, p)
+  rm(VdE_A_score, dnorm_lambda, distr_ind, p1, p2, p3)
 }
 ```
 
-```{r}
-# plot_mix_comps <- function(x, mu, sigma, lam) {
-#   lam * dnorm(x, mu, sigma)
-# }
-# 
-# set.seed(1)
-# vect_val <- distrib_auc$val[distrib_auc$conc == 1]
-# mixmdl <- normalmixEM(vect_val, k = 2)
-# 
-# 
-# ggplot(data.frame(x = vect_val)) +
-# geom_histogram(aes(x, ..density..), binwidth = 1, colour = "black", 
-#                fill = "white") +
-# stat_function(geom = "line", fun = plot_mix_comps,
-#               args = list(mixmdl$mu[1], mixmdl$sigma[1], lam = mixmdl$lambda[1]),
-#               colour = "red", lwd = 1.5) +
-# stat_function(geom = "line", fun = plot_mix_comps,
-#               args = list(mixmdl$mu[2], mixmdl$sigma[2], lam = mixmdl$lambda[2]),
-#               colour = "blue", lwd = 1.5) +
-# ylab("Density")
-# 
-# dif_distrib = function(x){
-#   mixmdl$lambda[1] * dnorm(x, mixmdl$mu[1], mixmdl$sigma[1]) - mixmdl$lambda[2] * dnorm(x, mixmdl$mu[2], mixmdl$sigma[2])
-# }
-# 
-# thresh_res = uniroot(f = dif_distrib, lower=-50, upper=150)$root
+We select the concentration for which the standard deviation is the highest, or for which the "van der Eijk's A" statistic is closest to 0, therefore concentration 1 in this case. We average the 2 repetitions of a same sample, and reshape the data to obtain `area_ob`.
 
-```
-
-We select the concentration for which the standard deviation is the highest, or for which the "van der Eijk's A" statistic is closest to 0, therefore concentration 1 in this case. We average the 2 repetitions of a same sample, and reshape the data to obtain `auc_ob`.
-
-We standardize the AUC values to range between 0 (lowest value) and 1 (highest value).
+We standardize the indicator values to range between 0 (lowest value) and 1 (highest value).
 
 ```{r}
 
@@ -309,38 +300,42 @@ if(type_res_data == "growth_curves"){
   
   gcur = gcur[which(gcur$Conc. == conc_used),]
   
-  gcur = dcast(gcur, SampleID + Conc. + FlockID + SamplPoint + Time ~ Repeat, value.var="value")
-  gcur$od = (gcur$`1` + gcur$`2`)/2
-  gcur = gcur[,c("SampleID", "Conc.", "FlockID", "SamplPoint", "Time", "od")]
-  
-  auc_ob = as.data.frame(matrix(NA, nrow = length(unique(gcur$FlockID)), ncol = length(unique(gcur$SamplPoint))))
-  dimnames(auc_ob) = list(unique(gcur$FlockID), c("S", "M", "E"))
+  area_ob = as.data.frame(matrix(NA, nrow = length(unique(gcur$FlockID)), ncol = length(unique(gcur$SamplPoint))))
+  dimnames(area_ob) = list(unique(gcur$FlockID), c("S", "M", "E"))
   for(flo in unique(gcur$FlockID)){
     for(sp in unique(gcur$SamplPoint)){
       if(length(1:79) == length(gcur$od[which((gcur$Time %in% (1:79)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])){
         
         # times_with_data = gcur$Time[which(is.finite(gcur$od) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))]
         
-        auc_ob[flo, sp] = trapz(x = (1:79), y = gcur$od[which((gcur$Time %in% (1:79)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])
+        area_ob[flo, sp] = trapz(x = (1:79), y = gcur$od[which((gcur$Time %in% (1:79)) & (gcur$FlockID == flo) & (gcur$SamplPoint == sp))])
       }else{
         print(paste0("Impossible to compute area under curve for flock ", flo, ", sampling point ", sp))
       }
     }
   }
   
-  thresh_res = (thresh_res - min(auc_ob, na.rm=T))/(max(auc_ob, na.rm=T) - min(auc_ob, na.rm=T))
-  auc_ob = (auc_ob - min(auc_ob, na.rm=T))/(max(auc_ob, na.rm=T) - min(auc_ob, na.rm=T))
+  thresh_res = (thresh_res - min(area_ob, na.rm=T))/(max(area_ob, na.rm=T) - min(area_ob, na.rm=T))
+  area_ob = (area_ob - min(area_ob, na.rm=T))/(max(area_ob, na.rm=T) - min(area_ob, na.rm=T))
   
-  auc_ob = auc_ob[which(! rownames(auc_ob) %in% c("0351", "0381", "0391", "0765", "0771")),]
+  # area_ob = area_ob[which(! rownames(area_ob) %in% c("0351", "0381", "0391", "0765", "0771")),]
   # mic_data = mic_data[which(! mic_data$ID %in% c("0351", "0381", "0391", "0765")),]
   
-  res_data = auc_ob
+  res_data = area_ob
 
-  rm(flo, sp, auc_ob)
+  rm(flo, sp, area_ob)
 }
 ```
 
-No matters if the resistance metric we chose is "growth_curves" or "mic", the measure is between 0 (lowest resistance) and 1 (highest resistance). We print the first rows of the resistance dataset `res_data`:
+No matters if the resistance metric we chose is "growth_curves" or "mic", the measure is between 0 (lowest resistance) and 1 (highest resistance). Moreover, if we chose to use a logistic model in the analysis, we turn the quantitative values of resistance to qualitative (Resistant=1 or Sensitive=0) using the threshold found above. Note that we removed incomplete observations (i.e. cycles for which at least one of the 3 samples is missing).
+
+```{r}
+if(type_mod == "logis"){
+  res_data = as.data.frame(res_data > thresh_res)
+}
+```
+
+We print the first rows of the resistance dataset `res_data`:
 
 ```{r}
 print(head(res_data))
@@ -379,8 +374,13 @@ init_flock_size = rep(NA, n_cyc)
 rownames(col_expo) = rownames(col_expo_quanti) = rownames(allab_expo) = rownames(allab_expo_quanti) = rownames(weeks_samp) = names(init_flock_size) = rownames(res_data)
 
 for(i in 1:n_cyc){
-  farm_i = id_matrix$FarmID[i]
-  flockseq_i = id_matrix$Flockseq[i]
+  farm_i = id_matrix$FarmID[id_matrix$ID == rownames(res_data)[i]]
+  flockseq_i = id_matrix$Flockseq[id_matrix$ID == rownames(res_data)[i]]
+  
+  if(rownames(res_data)[i] != paste0(substr(farm_i, nchar(farm_i)-2, nchar(farm_i)), substr(flockseq_i, nchar(flockseq_i), nchar(flockseq_i)))){
+    print(paste("CAUTION: Wrong farm or flock ID is used for cycle number", i))
+    break
+  }
   
   if(!(any(viparc_data_quali$completed[which((viparc_data_quali$farm == farm_i)&(viparc_data_quali$flock == flockseq_i))]) == T)){
     print(paste0("For farm ",farm_i,", flock sequence ",flockseq_i,", the production cycle was not completed"))
@@ -442,7 +442,7 @@ rm(i, wk, weeks_col_use, weeks_col_no_use, weeks_allab_use, weeks_allab_no_use, 
 
 ## Production cycles, AMU and sampling dates
 
-We plot the AMU and sampling dates for the `n_cyc` cycles. We also plot an example of the growth curves available for each sample, and the area under curve.
+We plot the AMU and sampling dates for the `n_cyc` cycles. We also plot an example of the growth curves available for each sample, and the area between two curves (indicator of resistance).
 
 ```{r, fig.width=8, fig.height=6, fig.retina=2}
 plot(x=c(0,0.1), y=c(0,0), xlim=c(0,ncol(col_expo)+8), ylim=c(0,n_cyc+10), type="l", xlab="Weeks", ylab="", axes=F)
@@ -450,9 +450,6 @@ axis(side = 1)
 title(ylab="Cycles", mgp=c(0,1,0))
 
 for (i in 1:n_cyc){
-  
-  # rect(xleft = 0.5, xright = 0.5+max(which(! is.na(col_expo[i,]))), ybottom = i-0.5, ytop = i+0.5, col = "bisque", border="bisque")
-  
   for (j in 1:max(which(! is.na(col_expo[i,])))){
     
     rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "bisque", border="grey")
@@ -465,15 +462,10 @@ for (i in 1:n_cyc){
 
     if (any(weeks_samp[i,] == j, na.rm=T)){
       if (is.finite(res_data[i, which(weeks_samp[i,] == j)])){
-        # rect(xleft = j-0.07, xright = j+0.07, ybottom = i-0.5, ytop = i+0.5, col = "black", border="black")
-        # lines(x = c(j-0.5, j+0.5), y = c(i-0.5, i+0.5), col = "black")
-        # lines(x = c(j-0.5, j+0.5), y = c(i+0.5, i-0.5), col = "black")
         lines(x = c(j, j), y = c(i-0.5, i+0.5), col = "black", lwd = 2)
       }
     }
   }
-  # lines(x = c(0.5, 0.5+max(which(! is.na(col_expo[i,])))), y = c(i-0.5, i-0.5), col="grey")
-  # lines(x = c(0.5, 0.5+max(which(! is.na(col_expo[i,])))), y = c(i+0.5, i+0.5), col="grey")
 }
 
 legend(x=0, y=n_cyc+7, inset=0.5, legend=c("Antimicrobials used, including colistin", "Non-colistin antimicrobials used", "No antimicrobials used"), fill=c("coral3", "deepskyblue4", "bisque"), cex = 0.8, bty = "n")
@@ -507,7 +499,7 @@ rm(i, j, p2, gcur, for_fig_panel)
 
 ## Resistance and AMU over time
 
-We plot the observed resistance (red dots) for each cycle.
+We plot the quantitative observed resistance (red dots) for each cycle.
 
 AMU (only colistin and all antibotics) is represented as colored bars. We can plot the qualitative use (yes/no each week) (`amu_quanti=F`), or the quantitative use (amount per kg of chicken each week) (`amu_quanti=T`). In the latter case, we fix a ceiling, i.e. a maximum of the quantity plotted: this is to avoid one large AMU measure preventing to observe lower quantities on the graph. This ceiling is determined by `ratio_resmet_quanti_amu` which is the ratio between the maximum value of the resistance metric, and the maximum value of the AMU **on the plot** (no consequence on the values in the analysis).
 
@@ -590,8 +582,8 @@ resamu = function(nwkseff, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", 
   for(cyc_i in 1:n_cyc){
     for(time_i in 2:3){
       
-      first_amu_week_consid = weeks_samp[cyc_i, time_i] - nwkseff
-      last_amu_week_consid = weeks_samp[cyc_i, time_i] - 1
+      first_amu_week_consid = max(1, weeks_samp[cyc_i, time_i] - nwkseff - 1)
+      last_amu_week_consid = as.numeric(weeks_samp[cyc_i, time_i] - 1)
       
       if(expo == "allab"){
         use_quali = allab_expo
@@ -602,7 +594,7 @@ resamu = function(nwkseff, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", 
       }
       
       if(tempo_amu %in% c("step", "linear")){
-        inc_wks = max(1, first_amu_week_consid):last_amu_week_consid
+        inc_wks = floor(first_amu_week_consid):last_amu_week_consid
       }else if(tempo_amu == "exp_decay"){
         inc_wks = 1:last_amu_week_consid
       }
@@ -615,11 +607,15 @@ resamu = function(nwkseff, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", 
       }
 
       if(tempo_amu == "linear"){
-        time_eff = seq(0, 1, length.out = nwkseff+1)[-1]
+        time_eff = seq(0, 1, length.out = length(inc_wks)+1)[-1]
         amu_t[inc_wks] = amu_t[inc_wks] * time_eff
       }else if(tempo_amu == "exp_decay"){
-        time_eff = (exp(-log(100)/nwkseff))^(rev(inc_wks)-1)
+        time_eff = (exp(log(0.01)/(nwkseff+1)))^(rev(inc_wks)-1)
         amu_t = amu_t * time_eff
+      }
+      
+      if((tempo_amu %in% c("step", "linear")) & (ceil(first_amu_week_consid) - first_amu_week_consid != 0)){
+        amu_t[floor(first_amu_week_consid)] = amu_t[floor(first_amu_week_consid)] * (ceil(first_amu_week_consid) - first_amu_week_consid)
       }
       
       amu_t = sum(amu_t)
@@ -650,7 +646,7 @@ resamu = function(nwkseff, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", 
 
   if(obj == "plot"){
     p = ggplot(data=obtab, aes(x=obtab[,var_to_plot], y=resquanti, col=init))
-    p = p + xlab("Recent AMU") + ylab("Measure of resistance")
+    p = p + ylab("Measure of resistance")
     p = p + ggtitle(paste0("Pearson correlation between recent AMU and the measure of resistance: ", round(cor(obtab$amu_t, obtab$resquanti, use="complete.obs"), 3)))
     p = p + geom_point()
     p = p + geom_hline(yintercept = thresh_res, linetype="dashed", col="grey")
@@ -664,7 +660,7 @@ resamu = function(nwkseff, quantuse=amu_model_is_quanti, tempo_amu="exp_decay", 
 
 ```
 
-Here, either we run an interactive Shiny app, or we plot a simple graph showing on the y-axis the measured resistance, and on the x-axis the AMU (qualitative, all classes) in the last 3 days before each sampling, with an exponential decay of the effect of antibiotics. The color is the value of resistance in the initial sample of the production cycle (week 1). This is to observe the graphical association between resistance and AMU, and the group of observations for which resistance is high but AMU is low. For the last ones, we want to test if this high resistance could be explained by introductions.
+Here, either we run an interactive Shiny app, or we plot a simple graph showing on the y-axis the measured resistance, and on the x-axis the AMU (qualitative, all classes) in the last 3 days before each sampling, with an exponential decay of the effect of antibiotics. The color is the value of resistance in the initial sample of the production cycle (week 1). This is to observe the graphical association between resistance and AMU, and the group of observations for which resistance is high but AMU is low. For the last ones, we want to test if this high resistance could be explained by events of contamination.
 
 ```{r, fig.width=7, fig.height=5}
 ui <- fluidPage({
@@ -725,14 +721,14 @@ rm(ui, server, run_shiny)
 
 ## Model and Expectation-Maximization algorithm
 
-The introduction of colistin resistant bacteria from outside the flock is not measured but can potentially play an important role in the resistance of the sample. We consider a latent (unobserved) binary variable to describe if an introduction happened in the farm (yes/no).
+Some events of contamination with colistin resistant bacteria may be not measured but can potentially play an important role in the resistance of the sample. We consider a latent (unobserved) binary variable to describe if a contamination event happened in the farm (yes/no).
 
 We use an Expectation-Maximization (E-M) algorithm with 2 steps:
 
-* Expectation: given a set of parameters, determine the most likely status for introduction (yes/no) for each observation.
-* Maximization: given an assumed introduction status, determine the set of parameters maximizing the likelihood of the model.
+* Expectation: given a set of parameters, determine the probability of occurrence of a contamination event for each observation.
+* Maximization: given this contamination probability, determine the set of parameters maximizing the likelihood of the model.
 
-The algorithm is initiated with a random set of parameters, and is terminated when a convergence of likelihood is reached.
+The algorithm is initiated with a given probability of contamination, and is terminated when a convergence of likelihood is reached.
 
 For all observations in the 2nd or 3rd round of samplings, we define a model used in the Maximization step. Several models are tested, all being simplified versions of this full model:
 
@@ -773,7 +769,7 @@ p = p + geom_point(aes(x=6.1, y=0.05), size=4, col="dodgerblue4")
 p = p + geom_point(aes(x=10, y=0.95), size=4, col="dodgerblue4")
 p = p + geom_text(aes(x=4.5, y=-0.03, label = "delta"), parse = T, size=5, col="brown")
 p = p + geom_text(aes(x=-0.2, y=0.3, label = "theta"), parse = T, size=5, col="black")
-p = p + geom_text(aes(x=6.1, y=0.12, label = as.character(expression(paste("t"["ij"]," -",~beta)))), parse = T, size=5, col="dodgerblue4")
+p = p + geom_text(aes(x=6.1, y=0.12, label = as.character(expression(paste("t"["ij"]," -",~beta," -1")))), parse = T, size=5, col="dodgerblue4")
 p = p + geom_text(aes(x=10, y=1, label = as.character(expression(paste("t"["ij"]," -1")))), parse = T, size=5, col="dodgerblue4")
 p = p + geom_text(aes(x=-0.4, y=0.05, label = as.character(expression(~epsilon~alpha))), parse = T, size=5, col="black")
 p = p + geom_text(aes(x=-0.2, y=-0.03, label = "0"), parse = T, size=5, col="black")
@@ -833,79 +829,36 @@ We also define `run2_intr` which is a wraper: its output is the function `run2` 
 ```{r}
 run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd){
 
-  beta = 10 * sigmoid(beta) +1
+  beta = 4 * sigmoid(beta)
   delta = 4 * sigmoid(delta) +1
-  
-  if(type_mod == "linear"){
-    mu = sigmoid(mu)
-    lambda1 = lambda1
-    lambda2 = lambda2
-    alpha = alpha
-    teta = teta
-    eta = sigmoid(eta)
-    Sd = 3 * sigmoid(Sd)
-  }else if(type_mod == "logis"){
-    eta = val_eta
-    Sd = 1
-  }
+  eta = val_eta
 
-  obsdat = resamu(nwkseff=beta, quantuse=amu_model_is_quanti, tempo_amu="linear", ignore.nul=F, lag_amu_init=delta, obj="est", expo=definition_amu)
-  obsdat = obsdat[! is.na(obsdat$resquanti),]
-  obsdat$init[is.na(obsdat$init)] = mean(obsdat$init, na.rm=T) # 0
-  obsdat$prev[is.na(obsdat$prev)] = mean(obsdat$prev, na.rm=T) # 0
+  obsdat = resamu(nwkseff=beta, quantuse=amu_model_is_quanti, tempo_amu=effect_recent_amu, ignore.nul=F, lag_amu_init=delta, obj="est", expo=definition_amu)
+  # obsdat = obsdat[! is.na(obsdat$resquanti),]
+  # obsdat$init[is.na(obsdat$init)] = mean(obsdat$init, na.rm=T) # 0
+  # obsdat$prev[is.na(obsdat$prev)] = mean(obsdat$prev, na.rm=T) # 0
   obsdat$introduc = intr
 
-  if(type_mod == "linear"){
-    
-    obsdat$predmod_intro = mu + eta # mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init + eta
-    
-    obsdat$predmod_nointro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init
-    
-    obsdat$predmod = obsdat$introduc * obsdat$predmod_intro + (1-obsdat$introduc) * obsdat$predmod_nointro
-
-    # total_loglik = dnorm(x=obsdat$resquanti, mean=obsdat$predmod, sd=Sd, log=T)
-    lik_intro = dnorm(x=obsdat$resquanti, mean=obsdat$predmod_intro, sd=Sd)
-    lik_nointro = dnorm(x=obsdat$resquanti, mean=obsdat$predmod_nointro, sd=Sd)
-    total_loglik = log(obsdat$introduc * lik_intro + (1-obsdat$introduc) * lik_nointro)
-    total_loglik[is.infinite(total_loglik)] = -710
-
-    if(aim == "est"){
-      
-      return(-sum(total_loglik))
-      
-    }else if (aim == "pred"){
-      
-      obsdat$predmod_inf = qnorm(p = 0.025, mean=obsdat$predmod, sd=Sd)
-      obsdat$predmod_sup = qnorm(p = 0.975, mean=obsdat$predmod, sd=Sd)
-      
-      return(list(obsdat = obsdat[,c("resquanti", "amu_init", "amu_t", "introduc", "predmod", "cycle", "predmod_inf", "predmod_sup", "init")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta, Sd)))
-    }
+  obsdat$glm_predmod_intro = eta
+  # obsdat$glm_predmod_intro = pmax(pmin(obsdat$glm_predmod_intro, 0.999), 0.001)
   
-  }else if(type_mod == "logis"){
-    
-    obsdat$init = (obsdat$init >= thresh_res)
-    obsdat$prev = (obsdat$prev >= thresh_res)
-    # obsdat$amu_init = (obsdat$amu_init >0)
-    
-    obsdat$glm_predmod_intro = eta
-    
-    obsdat$glm_predmod_nointro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init
-    obsdat$glm_predmod_nointro = pracma::sigmoid(obsdat$glm_predmod_nointro)
-    
-    obsdat$predmod = obsdat$introduc * obsdat$glm_predmod_intro + (1-obsdat$introduc) * obsdat$glm_predmod_nointro #(1-obsdat$introduc) * obsdat$glm_predmod_nointro
-    
-    total_loglik = (1-obsdat$introduc) * log(obsdat$glm_predmod_nointro ^ obsdat$resquali * ((1-obsdat$glm_predmod_nointro) ^ (1-obsdat$resquali))) + obsdat$introduc * log(obsdat$glm_predmod_intro ^ obsdat$resquali * ((1-obsdat$glm_predmod_intro) ^ (1-obsdat$resquali)))
-    
+  obsdat$glm_predmod_nointro = mu + lambda1 * obsdat$init + (lambda2 * obsdat$prev)*as.numeric(obsdat$end) + alpha * obsdat$amu_t + teta * obsdat$amu_init
+  obsdat$glm_predmod_nointro = pracma::sigmoid(obsdat$glm_predmod_nointro)
+  # obsdat$glm_predmod_nointro = pmax(pmin(obsdat$glm_predmod_nointro, 0.999), 0.001)
+  
+  obsdat$predmod = obsdat$introduc * obsdat$glm_predmod_intro + (1-obsdat$introduc) * obsdat$glm_predmod_nointro
+  
+  total_loglik = (1-obsdat$introduc) * log(obsdat$glm_predmod_nointro ^ obsdat$resquali * ((1-obsdat$glm_predmod_nointro) ^ (1-obsdat$resquali))) + obsdat$introduc * log(obsdat$glm_predmod_intro ^ obsdat$resquali * ((1-obsdat$glm_predmod_intro) ^ (1-obsdat$resquali)))
+  
 total_loglik[is.infinite(total_loglik)] = -710
 
-    if(aim == "est"){
-      
-      return(-sum(total_loglik))
-      
-    }else if (aim == "pred"){
+  if(aim == "est"){
+    
+    return(-sum(total_loglik))
+    
+  }else if (aim == "pred"){
 
-      return(list(obsdat = obsdat[,c("resquali", "amu_init", "amu_t", "introduc", "predmod", "cycle", "resquanti", "init", "prev")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta=eta, Sd=Sd)))
-    }
+    return(list(obsdat = obsdat[,c("resquali", "amu_init", "amu_t", "introduc", "predmod", "cycle", "resquanti", "init", "prev")], minll = -sum(total_loglik), true_param = c(mu, lambda1, lambda2, alpha, beta, teta, delta, eta=eta, Sd=Sd)))
   }
 }
 
@@ -922,7 +875,7 @@ run2_intr <- function(x) {
 This function takes as input the fitted model, and returns a plot with one dot per observation: the observed resistance on x-axis, the predicted resistance on y-axis.
 
 ```{r}
-fitplot = function(fitted_model, intro){
+fitplot = function(fitted_model, intro, var_to_plot = "amu_t"){
   fit_coef = coef(fitted_model)
   
   obs_vs_pred = run2(aim="pred", intr=intro, mu=fit_coef["mu"], lambda1=fit_coef["lambda1"], lambda2=fit_coef["lambda2"], alpha=fit_coef["alpha"], beta=fit_coef["beta"], teta=fit_coef["teta"], delta=fit_coef["delta"], eta=fit_coef["eta"], Sd=fit_coef["Sd"])
@@ -934,19 +887,13 @@ fitplot = function(fitted_model, intro){
   print("True values of parameters:")
   print(true_fit_coef)
   
-  if(type_mod == "linear"){
-    p = ggplot(obs_vs_pred[[1]], aes(x = resquali, y = predmod, fill = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, col = introduc))
-  }else if(type_mod == "logis"){
-    p = ggplot(obs_vs_pred[[1]], aes(x = resquanti, y = predmod, fill = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, col = introduc))
-    p = p + geom_vline(xintercept = thresh_res, linetype = "dashed")
-    p = p + geom_hline(yintercept = thresh_res, linetype = "dashed")
-  }
+  p = ggplot(obs_vs_pred[[1]], aes(x = resquanti, y = predmod, fill = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, col = introduc))
+  p = p + geom_vline(xintercept = thresh_res, linetype = "dashed")
+  p = p + geom_hline(yintercept = thresh_res, linetype = "dashed")
   p = p + xlab("Observed resistance") + ylab("Predicted resistance")
   p = p + ggtitle(paste0("Observed VS Predicted resistance (minus LogLikelihood =", round(minll, 2), ")"))
   p = p + geom_abline(intercept = 0, slope = 1, linetype = "dashed")
-  if(type_mod == "linear"){
-    p = p + geom_errorbar(aes(ymin = predmod_inf, ymax = predmod_sup), col = "grey")
-  }
+  set.seed(78)
   p = p + geom_jitter(shape = 21, size = 3)
   p = p + labs(col = "Probability of introduction (outline):", fill = "Global AMU metric (interior color):")
   p = p + scale_colour_gradient(low = "green", high = "red")
@@ -961,22 +908,13 @@ fitplot = function(fitted_model, intro){
     p2 = p2 + ggtitle("Resistance = f(recent amu)")
     p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = true_fit_coef["eta"]), col = "red")
     p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = amr), col = "green")
-    p2 = p2 + geom_point(data = obs_vs_pred[[1]], aes(x = amu_t, y = resquanti, col = introduc, fill = predmod, shape = (predmod>=thresh_res)), size = 3)
+    set.seed(78)
+    p2 = p2 + geom_jitter(data = obs_vs_pred[[1]], aes(x = amu_t, y = resquanti, col = introduc, fill = predmod, shape = (predmod>=thresh_res)), size = 3, height = 0.1, width = 0)
     p2 = p2 + scale_color_gradient(name = "Probability of introduction", low = "green", high = "red")
     p2 = p2 + scale_fill_gradient(name = "Predicted resistance", low = "white", high = "blue")
     p2 = p2 + scale_shape_manual(name = "Predicted resistance (quali)", values = c(21, 22))
     plot(p2)
-    
-    p3 = ggplot()
-    p3 = p3 + xlab("Recent AMU") + ylab("Observed resistance (quali)")
-    p3 = p3 + ggtitle("Resistance = f(recent amu)")
-    p3 = p3 + geom_line(data=for_curve, aes(x = amu, y = true_fit_coef["eta"]), col = "red")
-    p3 = p3 + geom_line(data=for_curve, aes(x = amu, y = amr), col = "green")
-    p3 = p3 + geom_point(data = obs_vs_pred[[1]], aes(x = amu_t, y = as.numeric(resquali), col = introduc, shape = (predmod>=thresh_res)), size = 3)
-    p3 = p3 + scale_color_gradient(name = "Probability of introduction", low = "green", high = "red")
-    p3 = p3 + scale_shape_manual(name = "Predicted resistance (quali)", values = c(16, 17))
-    plot(p3)
-    
+
     print(paste0("Sensitivity: ", sum((obs_vs_pred[[1]]$predmod >= thresh_res) & (obs_vs_pred[[1]]$resquali))/sum(obs_vs_pred[[1]]$resquali)))
     print(paste0("Specificity: ", sum((obs_vs_pred[[1]]$predmod >= thresh_res) & (obs_vs_pred[[1]]$resquali))/sum(obs_vs_pred[[1]]$predmod >= thresh_res)))
     
@@ -1001,7 +939,8 @@ fitplot_for_EMalgo = function(fitted_model, intro){
     p2 = p2 + ggtitle("Resistance = f(recent amu)")
     p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = true_fit_coef["eta"]), col = "red")
     p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = amr), col = "green")
-    p2 = p2 + geom_point(data = obs_vs_pred[[1]], aes(x = amu_t, y = resquanti, col = introduc, fill = predmod, shape = (predmod>=thresh_res)), size = 3)
+    set.seed(78)
+    p2 = p2 + geom_jitter(data = obs_vs_pred[[1]], aes(x = amu_t, y = resquanti, col = introduc, fill = predmod, shape = (predmod>=thresh_res)), size = 3, height = 0.1, width = 0)
     p2 = p2 + scale_color_gradient(name = "Probability of introduction", low = "green", high = "red")
     p2 = p2 + scale_fill_gradient(name = "Predicted resistance", low = "white", high = "blue")
     p2 = p2 + scale_shape_manual(name = "Predicted resistance (quali)", values = c(21, 22))
@@ -1031,18 +970,12 @@ rep_est = function(nrep, minusloglrep, methodrep, controlrep, prev_est, fixedvar
     valpar[fixedvar] = 0
     
     if(prev_est[1] == "none"){
-      
-      if(type_mod == "linear"){
-        valpar[startvar] = runif(length(startvar))
-        valpar[c("mu", "beta", "delta", "eta", "Sd")] = lapply(X = valpar[c("mu", "beta", "delta", "eta", "Sd")], FUN = logit)
-      }else if(type_mod == "logis"){
-        valpar[startvar] = runif(length(startvar), min = -100, max = 100)
-        valpar[c("beta", "delta")] = logit(runif(2))
-      }
-      
+      valpar[startvar] = runif(length(startvar), min = -5, max = 5)
+      valpar[c("beta", "delta")] = logit(runif(2))
     }else{
       valpar[startvar] = prev_est[startvar]
     }
+    # valpar["mu"] = -10
 
     modrep[[repet]] = mle2(minuslogl=minusloglrep, method=methodrep, control=controlrep, fixed=valpar[fixedvar], start=valpar[startvar])
   }
@@ -1057,34 +990,34 @@ rep_est = function(nrep, minusloglrep, methodrep, controlrep, prev_est, fixedvar
 
 ### Implementation of the full E-M algorithm
 
-$$Q(\theta,\theta^t) = E[ln \, P(Y,Z|\theta) \quad |Y,\theta^t]$$
+$$Q(\theta,\theta^{(t)}) = E[ln \, P(Y,Z|\theta) \quad |Y,\theta^{(t)}]$$
 
 $$\begin{align*}
-Q(\theta,\theta^t)  &= \sum_{m} E[ln \, P(Y_m,Z_m|\theta) \quad |Y_m,\theta^t] \\
-                    &= \sum_{m} [P(Z_m=0|Y_m,\theta^t).ln \, P(Z_m=0,Y_m|\theta) \: + \: P(Z_m=1|Y_m,\theta^t).ln \, P(Z_m=1,Y_m|\theta)]
+Q(\theta,\theta^{(t)})  &= \sum_{m} E[ln \, P(Y_m,Z_m|\theta) \quad |Y_m,\theta^{(t)}] \\
+                    &= \sum_{m} [P(Z_m=0|Y_m,\theta^{(t)}).ln \, P(Z_m=0,Y_m|\theta) \: + \: P(Z_m=1|Y_m,\theta^{(t)}).ln \, P(Z_m=1,Y_m|\theta)]
 \end{align*}$$
 
 Therefore:
 $$\begin{align*}
-P(Z_m=1|Y_m,\theta^t) &= \frac{P(Z_m=1,Y_m|\theta^t)}{P(Y_m|\theta^t)}\\
-                      &= \frac{P(Z_m=1,Y_m|\theta^t)}{P(Z_m=0,Y_m|\theta^t) \: + \: P(Z_m=1,Y_m|\theta^t)}\\
+P(Z_m=1|Y_m,\theta^{(t)}) &= \frac{P(Z_m=1,Y_m|\theta^{(t)})}{P(Y_m|\theta^{(t)})}\\
+                      &= \frac{P(Z_m=1,Y_m|\theta^{(t)})}{P(Z_m=0,Y_m|\theta^{(t)}) \: + \: P(Z_m=1,Y_m|\theta^{(t)})}\\
                       &= \frac{\eta^{R_m}.(1-\eta)^{1-R_m}}{M_{m,t}^{R_m}.(1-M_{m,t})^{1-R_m} \: + \: \eta^{R_m}.(1-\eta)^{1-R_m}}
 \end{align*}$$ 
                       
-$$P(Z_m=0|Y_m,\theta^t) = 1-P(Z_m=1|Y_m,\theta^t)$$
+$$P(Z_m=0|Y_m,\theta^{(t)}) = 1-P(Z_m=1|Y_m,\theta^{(t)})$$
 
 And:
 
 $$\begin{align*}
-  Q(\theta,\theta^t) &= \sum_{m} [P(Z_m=0|Y_m,\theta^t).ln \, P(Z_m=0,Y_m|\theta) \: + \: P(Z_m=1|Y_m,\theta^t).ln \, P(Z_m=1,Y_m|\theta)]\\
-                     &= \sum_{m} [P(Z_m=0|Y_m,\theta^t).ln \, [P(Z_m=0|Y_m,\theta).P(Y_m|\theta)] \: + \: P(Z_m=1|Y_m,\theta^t).ln \, [P(Z_m=1|Y_m,\theta).P(Y_m|\theta)]]\\
-                     &= \sum_{m} [[ln \, P(Y_m|\theta)].[P(Z_m=0|Y_m,\theta^t)+P(Z_m=1|Y_m,\theta^t)]\\
-                     &\: + \: P(Z_m=0|Y_m,\theta^t).ln \, P(Z_m=0|Y_m,\theta) \: + \: P(Z_m=1|Y_m,\theta^t).ln \, P(Z_m=1|Y_m,\theta)]\\
-                     &= \sum_{m} [ln \, P(Y_m|\theta)] \: + \: H(\theta,\theta^t)\\
-                     &= L_{obs}(\theta) \: + \: H(\theta,\theta^t)\\
+  Q(\theta,\theta^{(t)}) &= \sum_{m} [P(Z_m=0|Y_m,\theta^{(t)}).ln \, P(Z_m=0,Y_m|\theta) \: + \: P(Z_m=1|Y_m,\theta^{(t)}).ln \, P(Z_m=1,Y_m|\theta)]\\
+                     &= \sum_{m} [P(Z_m=0|Y_m,\theta^{(t)}).ln \, [P(Z_m=0|Y_m,\theta).P(Y_m|\theta)] \: + \: P(Z_m=1|Y_m,\theta^{(t)}).ln \, [P(Z_m=1|Y_m,\theta).P(Y_m|\theta)]]\\
+                     &= \sum_{m} [[ln \, P(Y_m|\theta)].[P(Z_m=0|Y_m,\theta^{(t)})+P(Z_m=1|Y_m,\theta^{(t)})]\\
+                     &\: + \: P(Z_m=0|Y_m,\theta^{(t)}).ln \, P(Z_m=0|Y_m,\theta) \: + \: P(Z_m=1|Y_m,\theta^{(t)}).ln \, P(Z_m=1|Y_m,\theta)]\\
+                     &= \sum_{m} [ln \, P(Y_m|\theta)] \: + \: H(\theta,\theta^{(t)})\\
+                     &= L_{obs}(\theta) \: + \: H(\theta,\theta^{(t)})\\
 \end{align*}$$
 
-$$H(\theta,\theta^t)= \sum_{m} [P(Z_m=0|Y_m,\theta^t).ln \, P(Z_m=0|Y_m,\theta) \: + \: P(Z_m=1|Y_m,\theta^t).ln \, P(Z_m=1|Y_m,\theta)]$$
+$$H(\theta,\theta^{(t)})= \sum_{m} [P(Z_m=0|Y_m,\theta^{(t)}).ln \, P(Z_m=0|Y_m,\theta) \: + \: P(Z_m=1|Y_m,\theta^{(t)}).ln \, P(Z_m=1|Y_m,\theta)]$$
 
 $$Q(\theta^*,\theta^*)= L_{obs}(\theta^*) \: + \: H(\theta^*,\theta^*)$$
 
@@ -1116,35 +1049,14 @@ $$p(R_i \in M_{intro}) = \frac{exp(\frac{-(r_{intro}^i)^2}{2.\sigma^2})}{exp(\fr
 
 E_step <- function(observed, params, prev_p_intro) {
   
-  if(type_mod == "linear"){
-    sigma = 3 * sigmoid(params[["Sd"]]) # because the parameter is modified when estimated in function "run2"
-  }else if(type_mod == "logis"){
-    sigma = 0.1
-  }
-
   pred_intro = run2(aim="pred", intr=1, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
 
   pred_nointro = run2(aim="pred", intr=0, mu=params[["mu"]], lambda1=params[["lambda1"]], lambda2=params[["lambda2"]], alpha=params[["alpha"]], beta=params[["beta"]], teta=params[["teta"]], delta=params[["delta"]], eta=params[["eta"]], Sd=params[["Sd"]])[["obsdat"]]$predmod
   
   # Probability of "Intro":
-  if(type_mod == "linear"){
-    # Residuals of observations under models "Intro" and "No intro"
-    r_intro = abs(pred_intro - observed)
-    r_nointro = abs(pred_nointro - observed)
-    # Residuals follow a normal distribution
-    exp_intro = exp(- r_intro^2/(2*sigma^2))
-    exp_nointro = exp(- r_nointro^2/(2*sigma^2))
-    exp_intro = pmin(0.999, exp_intro)
-    exp_intro = pmax(0.001, exp_intro)
-    exp_nointro = pmin(0.999, exp_nointro)
-    exp_nointro = pmax(0.001, exp_nointro)
-    prob_intro = exp_intro / (exp_intro + exp_nointro)
-  }else if(type_mod == "logis"){
-    observed = as.numeric(observed >= thresh_res)
-    pred_intro = pmax(pmin(pred_intro, 0.999), 0.001)
-    pred_nointro = pmax(pmin(pred_nointro, 0.999), 0.001)
-    prob_intro = ((pred_intro ^ observed)*((1-pred_intro) ^ (1-observed)))/((pred_nointro ^ observed)*((1-pred_nointro) ^ (1-observed)) + (pred_intro ^ observed)*((1-pred_intro) ^ (1-observed)))
-  }
+  pred_intro = pmax(pmin(pred_intro, 0.999), 0.001)
+  pred_nointro = pmax(pmin(pred_nointro, 0.999), 0.001)
+  prob_intro = ((pred_intro ^ observed)*((1-pred_intro) ^ (1-observed)))/((pred_nointro ^ observed)*((1-pred_nointro) ^ (1-observed)) + (pred_intro ^ observed)*((1-pred_intro) ^ (1-observed)))
 
   prob_intro
 }
@@ -1165,29 +1077,29 @@ M_step <- function(introd, modnum, prevfit) {
   prop_intro = mean(introd)
   
   #####
-  if(modnum == 13){
+  if(modnum == 1){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta", "Sd", "eta"), startvar = c("mu"))
-  }else if(modnum == 14){
+  }else if(modnum == 2){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("lambda2",  "alpha",  "beta",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda1"))
-  }else if(modnum == 15){
+  }else if(modnum == 3){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("alpha",  "beta",  "teta",  "delta", "Sd", "eta"), startvar = c("mu", "lambda1",  "lambda2"))
-  }else if(modnum == 16){
+  }else if(modnum == 4){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("lambda1",  "lambda2",  "alpha",  "beta", "Sd", "eta"), startvar = c("mu",  "teta",  "delta"))
-  }else if(modnum == 17){
+  }else if(modnum == 5){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("lambda2",  "alpha",  "beta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "teta",  "delta"))
-  }else if(modnum == 18){
+  }else if(modnum == 6){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("alpha",  "beta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta"))
-  }else if(modnum == 19){
+  }else if(modnum == 7){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("lambda1",  "lambda2",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "alpha",  "beta"))
-  }else if(modnum == 20){
+  }else if(modnum == 8){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("lambda2",  "teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta"))
-  }else if(modnum == 21){
+  }else if(modnum == 9){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("teta",  "delta", "Sd", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta"))
-  }else if(modnum == 22){
+  }else if(modnum == 10){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("lambda1",  "lambda2", "Sd", "eta"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta"))
-  }else if(modnum == 23){
+  }else if(modnum == 11){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("lambda2", "Sd", "eta"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta"))
-  }else if(modnum == 24){
+  }else if(modnum == 12){
     modstep = rep_est(nrep=3, minusloglrep = run2_intr(introd), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = prevfit, fixedvar = c("Sd", "eta"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta",  "teta",  "delta"))
   }
   #####
@@ -1212,7 +1124,7 @@ We repeat the algorithm several times to make sure the whole space has been expl
 Convergence is defined as: the distance between the likelihood and the former likelihood is less than 1, 3 times in a row.
 
 ```{r}
-EM_algo <- function(modnum, numb_rep_algo=5, tol=0.001, max.step=100000000000, plot_step=T, init_p = 0.01) {
+EM_algo <- function(modnum, numb_rep_algo=5, tol=0.01, max.step=100000000000, plot_step=T, init_p = 0.01) {
 
   repetalgo = list()
   repetalgo_minloglik = c()
@@ -1223,11 +1135,13 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.001, max.step=100000000000, p
     step = 0
     minloglik = 10^6
     
-    introductions_next_step = init_p
     raw_params = "none"
     
     obs_res = resamu(obj="est", nwkseff=1, lag_amu_init=1, expo=definition_amu)$resquanti
     obs_res = obs_res[! is.na(obs_res)]
+    
+    introductions_next_step = init_p
+    # introductions_next_step = runif(length(obs_res))
 
     counting_for_convergence = 0
     while((step < 4) | ((counting_for_convergence <5) & (step <= max.step+1))){
@@ -1247,7 +1161,6 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.001, max.step=100000000000, p
       # }
       old.minloglik = minloglik
       minloglik = output_mstep[[2]]
-      print(paste0("Minus Log Likelihood: ", minloglik))
       modstep = output_mstep[[3]]
       param_true_format = output_mstep[[4]]
       cycle_id = output_mstep[[5]]
@@ -1255,6 +1168,12 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.001, max.step=100000000000, p
       if(plot_step){
         fitplot_for_EMalgo(modstep, introductions)
       }
+      Q_val = -minloglik
+      print(paste("Complete data LogLikelihood (Q function):", Q_val))
+      H_val = sum(introductions * log(introductions) + (1-introductions) * log(1-introductions))
+      print(paste("H function:", H_val))
+      obs_ll = Q_val - H_val
+      print(paste("Observed data LogLikelihood (Q-H):", obs_ll))
 
       if (abs(minloglik - old.minloglik) < tol){
         counting_for_convergence = counting_for_convergence +1
@@ -1305,10 +1224,10 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.001, max.step=100000000000, p
 
 From the real AMU data, we use simulated (fake) data of resistance to test our method on 4 scenarios:
 
-- No linear relationship between recent use and resistance, and no introductions (scenario 1)
-- No linear relationship between recent use and resistance, and introductions (scenario 2)
-- Linear relationship between recent use and resistance, and no introductions (scenario 3)
-- Linear relationship between recent use and resistance, and introductions (scenario 4)
+- No relationship between recent use and resistance, and no introductions (scenario 1)
+- No relationship between recent use and resistance, and introductions (scenario 2)
+- Relationship between recent use and resistance, and no introductions (scenario 3)
+- Relationship between recent use and resistance, and introductions (scenario 4)
 
 We fit models 1, 7, 13 and 19 in these 4 scenarios. The objective is to test the ability of our method to detect such situations.
 
@@ -1322,88 +1241,19 @@ rm(res_data)
 
 #### Scenario 1
 
-We create fake resistance data such that there is no relationship with recent AMU and no introduction: the resistance just follows a normal distribution of mean 0.4. This test has an interest for non bimodal data.
-
-```{r, fig.width=7, fig.height=5}
-if(type_mod == "linear"){
-  if(test_method_comp){
-    load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_1.rdata")
-    res_data = test_scenario_1[[1]]
-  }else{
-    res_data = as.data.frame(cbind(res_data_saved$S, rnorm(n_cyc, 0.4, 0.05), rnorm(n_cyc, 0.4, 0.05)))
-  }
-  
-  hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
-  resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="col")
-}
-
-```
-
-We fit models 1, 7, 13, 19:
-
-```{r, fig.width=6, fig.height=4}
-if(type_mod == "linear"){
-  
-  if(test_method_comp){
-    fit_model_1 = test_scenario_1[[2]]
-    fit_model_7 = test_scenario_1[[3]]
-    results_mod13 = test_scenario_1[[4]]
-    results_mod19 = test_scenario_1[[5]]
-  }else{
-    fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
-  
-    fit_model_7 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta"))
-  
-    results_mod13 = EM_algo(modnum=13, numb_rep_algo=3)
-  
-    results_mod19 = EM_algo(modnum=19, numb_rep_algo=3)
-    
-    test_scenario_1 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
-    save(test_scenario_1, file = "C:/Users/Jonathan/Desktop/test_scenario_1.rdata")
-  }
-  
-  fitplot(fitted_model = fit_model_1, intro = 0)
-  fitplot(fitted_model = fit_model_7, intro = 0)
-  fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
-  fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
-  
-  rm(res_data)
-}
-```
-
-Let us compare models' AIC. Minimum AIC should be model 1.
-
-```{r}
-if(type_mod == "linear"){
-  
-  print("AIC of model 1:")
-  bbmle::AIC(fit_model_1)
-  
-  print("AIC of model 7:")
-  bbmle::AIC(fit_model_7)
-  
-  print("AIC of model 13:")
-  bbmle::AIC(results_mod13[[1]]) #+ 2*results_mod13[["number_obs"]]
-  
-  print("AIC of model 19:")
-  bbmle::AIC(results_mod19[[1]]) #+ 2*results_mod19[["number_obs"]]
-  
-  print("Anova with models 1 and 7 (for instance):")
-  bbmle::anova(fit_model_1, fit_model_7)
-}
-
-```
-
-#### Scenario 2
-
 We create fake resistance data such that there is no relationship with recent AMU but there are introductions: the resistance follows a normal distribution of mean 0.2 (no introduction) or 0.7 (an introduction occurred).
 
 ```{r, fig.width=7, fig.height=5}
 if(test_method_comp){
-  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_2.rdata")
-  res_data = test_scenario_2[[1]]
+  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_1.rdata")
+  res_data = test_scenario_1[[1]]
 }else{
-  res_data = as.data.frame(cbind(res_data_saved$S, rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.5,0.5)), rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.5,0.5))))
+  res_data = data.frame(S = res_data_saved$S, M = rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.5,0.5)), E = rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.5,0.5)))
+  rownames(res_data) = rownames(res_data_saved)
+  
+  if(type_mod == "logis"){
+    res_data = as.data.frame(res_data > thresh_res)
+  }
 }
 
 hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
@@ -1416,25 +1266,18 @@ We fit models 1, 7, 13, 19:
 ```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
-  fit_model_1 = test_scenario_2[[2]]
-  fit_model_7 = test_scenario_2[[3]]
-  results_mod13 = test_scenario_2[[4]]
-  results_mod19 = test_scenario_2[[5]]
+  results_mod13 = test_scenario_1[[4]]
+  results_mod19 = test_scenario_1[[5]]
 }else{
-  fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
-
-  fit_model_7 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta"))
 
   results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
 
   results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
   
-  test_scenario_2 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
-  save(test_scenario_2, file = "C:/Users/Jonathan/Desktop/test_scenario_2.rdata")
+  test_scenario_1 = list(res_data, results_mod13, results_mod19)
+  save(test_scenario_1, file = "C:/Users/Jonathan/Desktop/test_scenario_1.rdata")
 }
 
-fitplot(fitted_model = fit_model_1, intro = 0)
-fitplot(fitted_model = fit_model_7, intro = 0)
 fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
 fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
 
@@ -1445,11 +1288,6 @@ fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
 Let us compare models' AIC. Minimum AIC should be model 13.
 
 ```{r}
-print("AIC of model 1:")
-bbmle::AIC(fit_model_1)
-
-print("AIC of model 7:")
-bbmle::AIC(fit_model_7)
 
 print("IC(H,Q) of model 13:")
 vec_p = results_mod13[[3]]
@@ -1463,70 +1301,55 @@ vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
 bbmle::AIC(results_mod19[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
-print("Anovas:")
-bbmle::anova(fit_model_7, results_mod19[[1]])
+print("Anova:")
 bbmle::anova(results_mod13[[1]], results_mod19[[1]])
 
 ```
 
-#### Scenario 3
+#### Scenario 2
 
 We create fake resistance data such that there is a relationship with recent AMU, but not many "Low use, high resistance" data points that correspond to introductions.
 
 ```{r, fig.width=7, fig.height=5}
 if(test_method_comp){
-  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_3.rdata")
-  res_data = test_scenario_3[[1]]
+  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_2.rdata")
+  res_data = test_scenario_2[[1]]
 }else{
-  if(type_mod == "linear"){
-    
-    mu_fake = logit(0.05)
-    beta_fake = 8
-    alpha_fake = 0.55
-    
-    res_data = res_data_saved
-    fake_res = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]$predmod
-    rm(res_data)
-    fake_res = fake_res + rnorm(length(fake_res), 0, 0.05)
-    
-    na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
-    if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
-    fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
-    
-    res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
-    rm(beta_fake, alpha_fake, fake_res, na_res_val)
-    
-  }else if(type_mod == "logis"){
-    
-    mu_fake = -15
-    beta_fake = 8
-    alpha_fake = 20
-    
-    res_data = res_data_saved
-    fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]
-    rm(res_data)
-    fake_res = fake_obsdat$predmod
-    fake_amu = fake_obsdat$amu_t
-    
-    low_use_high_res = NULL #sample(x = which(fake_amu < 0.5), size = 1)
-    fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
 
-    low_use_low_res = setdiff(which(fake_amu < 0.5), low_use_high_res)
-    fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
-    
-    high_use_low_res = 35 #NULL #sample(x = which(fake_amu >= 0.5), size = 1)#42
-    fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
-    
-    high_use_high_res = setdiff(which(fake_amu >= 0.5), high_use_low_res)
-    fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
-    
-    na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
-    if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
+  mu_fake = -15
+  beta_fake = 3.8
+  alpha_fake = 20
+  
+  res_data = res_data_saved
+  fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]
+  rm(res_data)
+  fake_res = fake_obsdat$predmod
+  fake_amu = fake_obsdat$amu_t
+  
+  low_use_high_res = NULL #sample(x = which(fake_amu < 0.5), size = 1)
+  fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
+
+  low_use_low_res = setdiff(which(fake_amu < 0.5), low_use_high_res)
+  fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
+  
+  high_use_low_res = 35 #sample(x = which(fake_amu >= 0.5), size = 1)#42 #NULL
+  fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
+  
+  high_use_high_res = setdiff(which(fake_amu >= 0.5), high_use_low_res)
+  fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
+  
+  na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
+  if(length(na_res_val) != 1){
+    print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")
+  }else{
     fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
-    
-    res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
-    rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
   }
+  
+  res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
+  res_data = as.data.frame(res_data > thresh_res)
+  
+  rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
+  
 }
 
 hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
@@ -1539,25 +1362,18 @@ We fit models 1, 7, 13, 19:
 ```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
-  fit_model_1 = test_scenario_3[[2]]
-  fit_model_7 = test_scenario_3[[3]]
-  results_mod13 = test_scenario_3[[4]]
-  results_mod19 = test_scenario_3[[5]]
+  results_mod13 = test_scenario_2[[2]]
+  results_mod19 = test_scenario_2[[3]]
 }else{
-  fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
-
-  fit_model_7 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta"))
 
   results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
 
   results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
   
-  test_scenario_3 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
-  save(test_scenario_3, file = "C:/Users/Jonathan/Desktop/test_scenario_3.rdata")
+  test_scenario_2 = list(res_data, results_mod13, results_mod19)
+  save(test_scenario_2, file = "C:/Users/Jonathan/Desktop/test_scenario_2.rdata")
 }
 
-fitplot(fitted_model = fit_model_1, intro = 0)
-fitplot(fitted_model = fit_model_7, intro = 0)
 fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
 fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
 
@@ -1568,11 +1384,6 @@ fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
 Let us compare models' AIC. Minimum AIC should be model 7.
 
 ```{r}
-print("AIC of model 1:")
-bbmle::AIC(fit_model_1)
-
-print("AIC of model 7:")
-bbmle::AIC(fit_model_7)
 
 print("IC(H,Q) of model 13:")
 vec_p = results_mod13[[3]]
@@ -1586,76 +1397,52 @@ vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
 bbmle::AIC(results_mod19[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
-print("Anovas:")
-bbmle::anova(fit_model_7, results_mod19[[1]])
+print("Anova:")
 bbmle::anova(results_mod13[[1]], results_mod19[[1]])
 
 ```
 
-#### Scenario 4
+#### Scenario 3
 
 We create fake resistance data such that there is a relationship with recent AMU. We also add "Low use, high resistance" data points that correspond to introductions.
 
 ```{r, fig.width=7, fig.height=5}
 if(test_method_comp){
-  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_4.rdata")
-  res_data = test_scenario_4[[1]]
+  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_3.rdata")
+  res_data = test_scenario_3[[1]]
 }else{
-  if(type_mod == "linear"){
-    mu_fake = logit(0.05)
-    beta_fake = 8
-    alpha_fake = 0.55
-    
-    res_data = res_data_saved
-    type_mod_saved = type_mod
-    fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]
-    fake_res = fake_obsdat$predmod
-    fake_amu = fake_obsdat$amu_t
-    rm(res_data)
-    fake_res = fake_res + rnorm(length(fake_res), 0, 0.05)
-    
-    introd_fake = sample(x = which(fake_res < 0.25), size = round(0.3*sum(fake_res < 0.25)))
-    fake_res[introd_fake] = rnorm(length(introd_fake), 0.6, 0.05)
-    
-    fake_res[42] = rnorm(1, 0.1, 0.05)
+  mu_fake = -15
+  beta_fake = 4
+  alpha_fake = 20
   
-    na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
-    if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
-    fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
-    
-    res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
-    rm(beta_fake, alpha_fake, introd_fake, fake_res, na_res_val, fake_obsdat)
+  res_data = res_data_saved
+  fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]
+  rm(res_data)
+  fake_res = fake_obsdat$predmod
+  fake_amu = fake_obsdat$amu_t
   
-  }else if(type_mod == "logis"){
-    mu_fake = -15
-    beta_fake = 8
-    alpha_fake = 20
-    
-    res_data = res_data_saved
-    fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]
-    rm(res_data)
-    fake_res = fake_obsdat$predmod
-    fake_amu = fake_obsdat$amu_t
-    
-    low_use_high_res = sample(x = which(fake_amu < 0.5), size = round(0.3*sum(fake_res < 0.5)))
-    fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
+  low_use_high_res = NULL #sample(x = which(fake_amu < 0.5), size = round(0.3*sum(fake_res < 0.5)))
+  fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
 
-    low_use_low_res = setdiff(which(fake_amu < 0.5), low_use_high_res)
-    fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
-    
-    high_use_low_res = 35 #sample(x = which(fake_amu >= 0.5), size = 1) #42
-    fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
-    
-    high_use_high_res = setdiff(which(fake_amu >= 0.5), high_use_low_res)
-    fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
-    
-    na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
-    if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
+  low_use_low_res = setdiff(which(fake_amu < 0.5), low_use_high_res)
+  fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
+  
+  high_use_low_res = 35 #sample(x = which(fake_amu >= 0.5), size = 1) #42
+  fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
+  
+  high_use_high_res = setdiff(which(fake_amu >= 0.5), high_use_low_res)
+  fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
+  
+  na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
+  if(length(na_res_val) != 1){
+    print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")
+  }else{
     fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
-    
-    res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
-    rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
   }
+  
+  res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
+  res_data = as.data.frame(res_data > thresh_res)
+  rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
 }
 
 hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
@@ -1668,25 +1455,17 @@ We fit models 1, 7, 13, 19:
 ```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
-  fit_model_1 = test_scenario_4[[2]]
-  fit_model_7 = test_scenario_4[[3]]
-  results_mod13 = test_scenario_4[[4]]
-  results_mod19 = test_scenario_4[[5]]
+  results_mod13 = test_scenario_3[[2]]
+  results_mod19 = test_scenario_3[[3]]
 }else{
-  fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
-
-  fit_model_7 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c( "lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta"))
-
   results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
 
   results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
   
-  test_scenario_4 = list(res_data, fit_model_1, fit_model_7, results_mod13, results_mod19)
-  save(test_scenario_4, file = "C:/Users/Jonathan/Desktop/test_scenario_4.rdata")
+  test_scenario_3 = list(res_data, results_mod13, results_mod19)
+  save(test_scenario_3, file = "C:/Users/Jonathan/Desktop/test_scenario_3.rdata")
 }
 
-fitplot(fitted_model = fit_model_1, intro = 0)
-fitplot(fitted_model = fit_model_7, intro = 0)
 fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
 fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
 
@@ -1697,12 +1476,6 @@ fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
 Let us compare models' AIC. Minimum AIC should be model 19.
 
 ```{r}
-print("AIC of model 1:")
-bbmle::AIC(fit_model_1)
-
-print("AIC of model 7:")
-bbmle::AIC(fit_model_7)
-
 print("IC(H,Q) of model 13:")
 vec_p = results_mod13[[3]]
 vec_p[vec_p == 0] = 1e-7
@@ -1715,8 +1488,7 @@ vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
 bbmle::AIC(results_mod19[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
-print("Anovas:")
-bbmle::anova(fit_model_7, results_mod19[[1]])
+print("Anova:")
 bbmle::anova(results_mod13[[1]], results_mod19[[1]])
 
 ```
@@ -1730,41 +1502,35 @@ if(test_method_comp){
   load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_5.rdata")
   res_data = test_scenario_5[[1]]
 }else{
-  if(type_mod == "linear"){
-    
-    print("Scenario only used with logistic model.")
-    
-  }else if(type_mod == "logis"){
-    
-    mu_fake = -15
-    delta_fake = 4
-    teta_fake = 20
-    
-    res_data = res_data_saved
-    fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=0, beta=1, teta=teta_fake, delta=logit((delta_fake-1)/4), eta=0, Sd=0.1)[["obsdat"]]
-    rm(res_data)
-    fake_res = fake_obsdat$predmod
-    fake_amu = fake_obsdat$amu_init
-    
-    low_use_high_res = NULL #sample(x = which(fake_amu < 2), size = 1)
-    fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
 
-    low_use_low_res = setdiff(which(fake_amu < 2), low_use_high_res)
-    fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
-    
-    high_use_low_res = NULL #sample(x = which(fake_amu >= 2), size = 1)#35
-    fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
-    
-    high_use_high_res = setdiff(which(fake_amu >= 2), high_use_low_res)
-    fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
-    
-    na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
-    if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
-    fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
-    
-    res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
-    rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
-  }
+  mu_fake = -15
+  delta_fake = 4
+  teta_fake = 20
+  
+  res_data = res_data_saved
+  fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=0, beta=1, teta=teta_fake, delta=logit((delta_fake-1)/4), eta=0, Sd=0.1)[["obsdat"]]
+  rm(res_data)
+  fake_res = fake_obsdat$predmod
+  fake_amu = fake_obsdat$amu_init
+  
+  low_use_high_res = NULL #sample(x = which(fake_amu < 2), size = 1)
+  fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
+
+  low_use_low_res = setdiff(which(fake_amu < 2), low_use_high_res)
+  fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
+  
+  high_use_low_res = NULL #sample(x = which(fake_amu >= 2), size = 1)#35
+  fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
+  
+  high_use_high_res = setdiff(which(fake_amu >= 2), high_use_low_res)
+  fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
+  
+  na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
+  if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
+  fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
+  
+  res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
+  rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
 }
 
 hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
@@ -1839,40 +1605,38 @@ if(test_method_comp){
   load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_6.rdata")
   res_data = test_scenario_6[[1]]
 }else{
-  if(type_mod == "linear"){
-    
-    print("Scenario only used with logistic model.")
-      
-  }else if(type_mod == "logis"){
-    mu_fake = -15
-    delta_fake = 4
-    teta_fake = 20
-    
-    res_data = res_data_saved
-    fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=0, beta=1, teta=teta_fake, delta=logit((delta_fake-1)/4), eta=0, Sd=0.1)[["obsdat"]]
-    rm(res_data)
-    fake_res = fake_obsdat$predmod
-    fake_amu = fake_obsdat$amu_init
-    
-    low_use_high_res = sample(x = which(fake_amu < 2), size = round(0.3*sum(fake_res < 2)))
-    fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
+  mu_fake = -15
+  delta_fake = 4
+  teta_fake = 20
+  
+  res_data = res_data_saved
+  fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=0, beta=1, teta=teta_fake, delta=logit((delta_fake-1)/4), eta=0, Sd=0.1)[["obsdat"]]
+  rm(res_data)
+  fake_res = fake_obsdat$predmod
+  fake_amu = fake_obsdat$amu_init
+  
+  low_use_high_res = sample(x = which(fake_amu < 2), size = round(0.3*sum(fake_res < 2)))
+  fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
 
-    low_use_low_res = setdiff(which(fake_amu < 2), low_use_high_res)
-    fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
-    
-    high_use_low_res = NULL #42 #sample(x = which(fake_amu >= 2), size = 1) #35
-    fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
-    
-    high_use_high_res = setdiff(which(fake_amu >= 2), high_use_low_res)
-    fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
-    
-    na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
-    if(length(na_res_val) != 1){print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")}
+  low_use_low_res = setdiff(which(fake_amu < 2), low_use_high_res)
+  fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
+  
+  high_use_low_res = NULL #42 #sample(x = which(fake_amu >= 2), size = 1) #35
+  fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
+  
+  high_use_high_res = setdiff(which(fake_amu >= 2), high_use_low_res)
+  fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
+  
+  na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
+  if(length(na_res_val) != 1){
+    print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")
+  }else{
     fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
-    
-    res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
-    rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
   }
+  
+  res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
+  res_data = as.data.frame(res_data > thresh_res)
+  rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
 }
 
 hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
@@ -1950,49 +1714,7 @@ rm(res_data_saved, test_scenario_1, test_scenario_2, test_scenario_3, test_scena
 
 If the computation was already performed, `alread_comp = T`.
 
-### Estimation of models 1 to 12 without introduction
-
-First, we fit models that do not take into account the introductions. For them, we do not need to implement the E-M algorithm. Because the package `bbmle` does not always find the likelihood maximum, we repeat the estimation 10 times with `rep_est`, and take the maximum likelihood among these repetitions. The list `lfit` contains all fitted models.
-
-```{r, label="Estimation of the models without introduction"}
-
-if(alread_comp){
-  
-  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - Exp - Diff/lfit_", definition_amu, "_isquanti", amu_model_is_quanti, ".rdata"))
-  
-}else{
-  lfit = list()
-  
-  lfit[[1]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
-  
-  lfit[[2]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda2",  "alpha",  "beta",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1"))
-  
-  lfit[[3]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("alpha",  "beta",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "lambda2"))
-  
-  lfit[[4]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta", "Sd"), startvar = c("mu", "teta", "delta"))
-  
-  lfit[[5]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda2",  "alpha",  "beta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "teta",  "delta"))
-  
-  lfit[[6]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("alpha",  "beta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "lambda2",  "teta",  "delta"))
-  
-  lfit[[7]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1",  "lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta"))
-  
-  lfit[[8]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda2",  "teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "alpha",  "beta"))
-  
-  lfit[[9]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("teta",  "delta", "eta", "Sd"), startvar = c("mu",  "lambda1",  "lambda2",  "alpha",  "beta"))
-  
-  lfit[[10]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1",  "lambda2", "eta", "Sd"), startvar = c("mu",  "alpha",  "beta",  "teta",  "delta"))
-  
-  lfit[[11]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda2", "eta", "Sd"), startvar = c("mu",  "lambda1",  "alpha",  "beta",  "teta",  "delta"))
-  
-  lfit[[12]] = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("eta", "Sd"), startvar = c("mu", "lambda1", "lambda2",  "alpha",  "beta",  "teta",  "delta"))
-  
-  rm(introd)
-}
-
-```
-
-### Parallel computation of the E-M algorithm for models 13 to 24
+### Parallel computation of the E-M algorithm for models 1 to 12
 
 We repeat the algorithm 5 times (with different seeds) per model, and each maximization step (model fit) is repeated 5 times (with different seeds too) to make sure the likelihood maximum is reached.
 
@@ -2007,26 +1729,15 @@ if(alread_comp){
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resulpar_13to21 = parLapply(cl, X=13:21, fun=EM_algo, numb_rep_algo=1, plot_step=F)
+  clusterExport(cl, c("effect_recent_amu","val_eta","thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  resulpar = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
   stopCluster(cl)
-  save(resulpar_13to21, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_13to21.rdata"))
-  
-  cl<-makeCluster(3)
-  clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resulpar_22to24 = parLapply(cl, X=22:24, fun=EM_algo, numb_rep_algo=1, plot_step=F)
-  stopCluster(cl)
-  save(resulpar_22to24, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_22to24.rdata"))
 
-  resulpar = c(resulpar_13to21, resulpar_22to24)
   save(resulpar, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_all.rdata"))
 
   as.numeric(Sys.time()) - t
   
-  for(m in 1:12){lfit[[m+12]] = resulpar[[m]][[1]]}
-  save(lfit, file = paste0("C:/Users/Jonathan/Desktop/lfit_", definition_amu, "_isquanti", amu_model_is_quanti, ".rdata"))
-  rm(m, cl)
+  rm(cl)
 }
 
 rm(alread_comp)
@@ -2044,54 +1755,54 @@ where $N$ is the total number of models, and $AIC_k$ is the AIC of model $k$.
 ```{r, fig.width=8, fig.height=6}
 l_Q_fct = l_H_fct = l_numb_par = c()
 
-for(m in 13:24){
-  l_Q_fct[m-12] = l_Q_fct[m] = -as.numeric(resulpar[[m-12]][[4]])
-  l_numb_par[m-12] = l_numb_par[m] = length(resulpar[[m-12]][[1]]@coef)
+for(m in 1:12){
+  l_Q_fct[m] = -as.numeric(resulpar[[m]][[4]])
   
-  vec_p = resulpar[[m-12]][[3]]
+  l_numb_par[m] = length(resulpar[[m]][[1]]@coef)
+  
+  vec_p = resulpar[[m]][[3]]
   vec_p[vec_p == 0] = 1e-7
   vec_p[vec_p == 1] = 1-(1e-7)
   
-  l_H_fct[m-12] = l_H_fct[m] = sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+  l_H_fct[m] = sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 }
 
 l_IC_HQ = -2*l_Q_fct + 2*l_H_fct + 2*l_numb_par
+l_LL_obs = l_Q_fct - l_H_fct
 
-tab_aic_ll = data.frame(mod = as.factor(1:24), Q_fct = l_Q_fct, H_fct = l_H_fct, numb_par = l_numb_par, IC_HQ = l_IC_HQ)
-plot_aic_ll = melt(tab_aic_ll, id = "mod")
+tab_comp_mod = data.frame(mod = as.factor(1:12), Q_fct = l_Q_fct, H_fct = l_H_fct, LL_obs = l_LL_obs, numb_par = l_numb_par, IC_HQ = l_IC_HQ)
+plot_comp_mod = melt(tab_comp_mod, id = "mod")
 
-p = ggplot(data = plot_aic_ll, aes(y = mod))
+p = ggplot(data = plot_comp_mod, aes(y = mod))
 p = p + ggtitle("Comparison of the fitted models") + xlab("Indicator value") + ylab("Models")
-# p = p + geom_vline(data = subset(plot_aic_ll, variable == "LogLikelihood"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "LogLikelihood"])), linetype = "dashed")
-# p = p + geom_vline(data = subset(plot_aic_ll, variable == "MinAIC"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "MinAIC"])), linetype = "dashed")
-# p = p + geom_vline(data = subset(plot_aic_ll, variable == "AIC_weights"), aes(xintercept = max(plot_aic_ll$value[plot_aic_ll$variable == "AIC_weights"])), linetype = "dashed")
+
+p = p + geom_vline(data = subset(plot_comp_mod, variable == "Q_fct"), aes(xintercept = max(plot_comp_mod$value[plot_comp_mod$variable == "Q_fct"])), linetype = "dashed")
+
+p = p + geom_vline(data = subset(plot_comp_mod, variable == "LL_obs"), aes(xintercept = max(plot_comp_mod$value[plot_comp_mod$variable == "LL_obs"])), linetype = "dashed")
+
+p = p + geom_vline(data = subset(plot_comp_mod, variable == "IC_HQ"), aes(xintercept = min(plot_comp_mod$value[plot_comp_mod$variable == "IC_HQ"])), linetype = "dashed")
+
 p = p + geom_point(aes(x = value), shape=18, size=2)
 p = p + facet_wrap(~variable, scales = "free_x")
 p = ggplotly(p)
 p
 
-rm(p, plot_aic_ll, l_Q_fct, l_H_fct, l_numb_par)
+rm(p, plot_comp_mod, l_Q_fct, l_H_fct, l_numb_par)
 ```
 
 According to the AIC, the best model is:
 
 ```{r}
-max_AICweight_model = which.max(tab_aic_ll$AIC_weights)
-print(paste0("Model ", max_AICweight_model))
+best_model = which.min(tab_comp_mod$IC_HQ)
+print(paste0("Model ", best_model))
 
 ```
 
 We plot its fit (observed VS predicted):
 
 ```{r, fig.width=6, fig.height=4}
-if(max_AICweight_model %in% (1:12)){
-  
-  fitplot(fitted_model = lfit[[max_AICweight_model]], intro = 0)
-  
-}else if(max_AICweight_model %in% (13:24)){
-  
-  fitplot(fitted_model = lfit[[max_AICweight_model]], intro = resulpar[[max_AICweight_model-12]][[3]])
-}
+
+fitplot(fitted_model = resulpar[[best_model]][[1]], intro = resulpar[[best_model]][[3]])
 
 ```
 
@@ -2102,16 +1813,16 @@ For instance, to compare the contributions of variables V1, V2 and V3, we start 
 Therefore, we first compare these ratios: [AIC weights of models 2, 4, 7 and 13] /  [AIC weights of model 1]:
 
 ```{r}
-print(tab_aic_ll$AIC_weights[2] /tab_aic_ll$AIC_weights[1])
-print(tab_aic_ll$AIC_weights[4] /tab_aic_ll$AIC_weights[1])
-print(tab_aic_ll$AIC_weights[7] /tab_aic_ll$AIC_weights[1])
-print(tab_aic_ll$AIC_weights[13] /tab_aic_ll$AIC_weights[1])
+print(tab_comp_mod$AIC_weights[2] /tab_comp_mod$AIC_weights[1])
+print(tab_comp_mod$AIC_weights[4] /tab_comp_mod$AIC_weights[1])
+print(tab_comp_mod$AIC_weights[7] /tab_comp_mod$AIC_weights[1])
+print(tab_comp_mod$AIC_weights[13] /tab_comp_mod$AIC_weights[1])
 
 ```
 
 ```{r}
-print(tab_aic_ll$AIC_weights[max_AICweight_model] /tab_aic_ll$AIC_weights[13])
-bbmle::anova(lfit[[max_AICweight_model]], lfit[[13]])
+print(tab_comp_mod$AIC_weights[best_model] /tab_comp_mod$AIC_weights[13])
+bbmle::anova(resulpar[[best_model]][[1]], resulpar[[1]][[1]])
 
 ```
 
@@ -2167,11 +1878,11 @@ gps_farms = gps_farms[! is.na(gps_farms$Lat),]
 We gather in a same data frame the farm IDs and introduction probabilities (`prob_intro_farms`):
 
 ```{r}
-max_AICweight_intro_model = max_AICweight_model -12
+max_AICweight_intro_model = best_model
 prob_intro_farms = data.frame(Farm = resulpar[[max_AICweight_intro_model]][[7]], Prob = resulpar[[max_AICweight_intro_model]][[3]])
 prob_intro_farms$Farm = rownames(weeks_samp)[prob_intro_farms$Farm]
 prob_intro_farms$Farm = substr(prob_intro_farms$Farm, 1, 3)
-prob_intro_farms$Obs_res = as.character(fitplot(fitted_model = lfit[[max_AICweight_model]], intro = resulpar[[max_AICweight_model-12]][[3]]))
+prob_intro_farms$Obs_res = as.character(fitplot(fitted_model = resulpar[[best_model]][[1]], intro = resulpar[[best_model]][[3]]))
 ```
 
 We add GPS information to `prob_intro_farms`.
@@ -2343,6 +2054,7 @@ spatial_moran = function(decay_param, decay_fct = "exp", pval = 0.05, plot_only_
   }
   p2 = p2 + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
   # p2 = p2 + geom_point(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 2)
+  set.seed(78)
   p2 = p2 + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 2, width = 0.003, height = 0.003)
   
   p2 = p2 + scale_fill_gradient2(name = "Probability of introduction:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
@@ -2491,6 +2203,7 @@ local_moran = function(decay_param, decay_fun, p_val, style_weight){
   p1 = p1 + blank()
 
   p2 = ggplot(data = prob_intro_farms, aes(x = scaled_prob, y = lag, fill = cluster))
+  set.seed(78)
   p2 = p2 + geom_jitter(col = "black", shape = 21, size = 4, width = 0.05, height = 0.05)
   p2 = p2 + geom_vline(xintercept = 0) + geom_hline(yintercept = 0)
   p2 = p2 + xlab("Scaled probability of introduction") + ylab("Spatial lag")
@@ -2560,13 +2273,13 @@ pA = pA  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), c
 pA = pA + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
 set.seed(78)
 pA = pA + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
-# pA = pA + scale_fill_gradient2(name = "Probability of contamination:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
+pA = pA + scale_fill_gradient2(name = "Probability of contamination:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
 # pA = pA + scale_alpha_continuous(name = "Value in the weight matrix:", range = c(0,1))
 pA = pA + ggsn::scalebar(dist = 5, location = "bottomleft", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
 pA = pA + theme(legend.position = "top")
 pA = pA + blank()
 
-pB = local_moran(decay_param = 2.3, decay_fun = "thresh", p_val = 0.05, style_weight = "W")[[2]]
+pB = local_moran(decay_param = 1, decay_fun = "exp", p_val = 0.05, style_weight = "W")[[2]]
 
 pC = ggplot()
 pC = pC  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
@@ -2650,6 +2363,7 @@ spatial_clusters = function(nb_clust, which_signif_clust = 1, adapted_to_shiny =
   if(length(signif_clust) != 0){
     p1 = p1 + geom_circle(data = analysis[analysis$in_group,], aes(x0 = (max(Long)+min(Long))/2, y0 = (max(Lat)+min(Lat))/2, r = 0.005 + max((max(Long)-min(Long))/2, (max(Lat)-min(Lat))/2)), col = "green", size = 1)
   }
+  set.seed(78)
   p1 = p1 + geom_jitter(data = analysis, aes(x = Long, y = Lat, fill = Prob, shape = in_group), col = "black", size = 3, width = 0.003, height = 0.003)
   # p1 = p1 + geom_point(data = analysis, aes(x = Long, y = Lat, fill = Prob, shape = in_group), col = "black", size = 3)
   p1 = p1 + scale_fill_gradient2(name = "Probability of introduction:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
