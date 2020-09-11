@@ -104,7 +104,7 @@ effect_recent_amu = "step"
 alread_comp = F
 test_method_comp = F
 almost_one = 0.999
-conc_used = 2
+conc_used = 4
 
 ```
 
@@ -1271,20 +1271,20 @@ We fit models 1, 7, 13, 19:
 ```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
-  results_mod13 = test_scenario_1[[4]]
-  results_mod19 = test_scenario_1[[5]]
+  results_mod1 = test_scenario_1[[4]]
+  results_mod7 = test_scenario_1[[5]]
 }else{
 
-  results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
+  results_mod1 = EM_algo(modnum=1, numb_rep_algo=1)
 
-  results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
+  results_mod7 = EM_algo(modnum=7, numb_rep_algo=1)
   
-  test_scenario_1 = list(res_data, results_mod13, results_mod19)
+  test_scenario_1 = list(res_data, results_mod1, results_mod7)
   save(test_scenario_1, file = "C:/Users/Jonathan/Desktop/test_scenario_1.rdata")
 }
 
-fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
-fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+fitplot(fitted_model = results_mod1[[1]], intro = results_mod1[[3]])
+fitplot(fitted_model = results_mod7[[1]], intro = results_mod7[[3]])
 
 # rm(res_data)
 
@@ -1295,19 +1295,19 @@ Let us compare models' AIC. Minimum AIC should be model 13.
 ```{r}
 
 print("IC(H,Q) of model 13:")
-vec_p = results_mod13[[3]]
+vec_p = results_mod1[[3]]
 vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod13[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+bbmle::AIC(results_mod1[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
 print("IC(H,Q) of model 19:")
-vec_p = results_mod19[[3]]
+vec_p = results_mod7[[3]]
 vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod19[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+bbmle::AIC(results_mod7[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
 print("Anova:")
-bbmle::anova(results_mod13[[1]], results_mod19[[1]])
+bbmle::anova(results_mod1[[1]], results_mod7[[1]])
 
 ```
 
@@ -1358,7 +1358,7 @@ if(test_method_comp){
 }
 
 hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
-resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="col")
+resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="col", tempo_amu = "step")
 
 ```
 
@@ -1367,20 +1367,20 @@ We fit models 1, 7, 13, 19:
 ```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
-  results_mod13 = test_scenario_2[[2]]
-  results_mod19 = test_scenario_2[[3]]
+  results_mod1 = test_scenario_2[[2]]
+  results_mod7 = test_scenario_2[[3]]
 }else{
 
-  results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
+  results_mod1 = EM_algo(modnum=1, numb_rep_algo=1)
 
-  results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
+  results_mod7 = EM_algo(modnum=7, numb_rep_algo=1)
   
-  test_scenario_2 = list(res_data, results_mod13, results_mod19)
+  test_scenario_2 = list(res_data, results_mod1, results_mod7)
   save(test_scenario_2, file = "C:/Users/Jonathan/Desktop/test_scenario_2.rdata")
 }
 
-fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
-fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+fitplot(fitted_model = results_mod1[[1]], intro = results_mod1[[3]])
+fitplot(fitted_model = results_mod7[[1]], intro = results_mod7[[3]])
 
 # rm(res_data)
 
@@ -1390,20 +1390,20 @@ Let us compare models' AIC. Minimum AIC should be model 7.
 
 ```{r}
 
-print("IC(H,Q) of model 13:")
-vec_p = results_mod13[[3]]
+print("IC(H,Q) of model 1:")
+vec_p = results_mod1[[3]]
 vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod13[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+bbmle::AIC(results_mod1[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
-print("IC(H,Q) of model 19:")
-vec_p = results_mod19[[3]]
+print("IC(H,Q) of model 7:")
+vec_p = results_mod7[[3]]
 vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod19[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+bbmle::AIC(results_mod7[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
 print("Anova:")
-bbmle::anova(results_mod13[[1]], results_mod19[[1]])
+bbmle::anova(results_mod1[[1]], results_mod7[[1]])
 
 ```
 
@@ -1417,7 +1417,7 @@ if(test_method_comp){
   res_data = test_scenario_3[[1]]
 }else{
   mu_fake = -15
-  beta_fake = 4
+  beta_fake = 3
   alpha_fake = 20
   
   res_data = res_data_saved
@@ -1451,7 +1451,7 @@ if(test_method_comp){
 }
 
 hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
-resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="col")
+resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="allab", tempo_amu = "step")
 
 ```
 
@@ -1460,19 +1460,19 @@ We fit models 1, 7, 13, 19:
 ```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
-  results_mod13 = test_scenario_3[[2]]
-  results_mod19 = test_scenario_3[[3]]
+  results_mod1 = test_scenario_3[[2]]
+  results_mod7 = test_scenario_3[[3]]
 }else{
-  results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
+  results_mod1 = EM_algo(modnum=1, numb_rep_algo=1)
 
-  results_mod19 = EM_algo(modnum=19, numb_rep_algo=1)
+  results_mod7 = EM_algo(modnum=7, numb_rep_algo=1)
   
-  test_scenario_3 = list(res_data, results_mod13, results_mod19)
+  test_scenario_3 = list(res_data, results_mod1, results_mod7)
   save(test_scenario_3, file = "C:/Users/Jonathan/Desktop/test_scenario_3.rdata")
 }
 
-fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
-fitplot(fitted_model = results_mod19[[1]], intro = results_mod19[[3]])
+fitplot(fitted_model = results_mod1[[1]], intro = results_mod1[[3]])
+fitplot(fitted_model = results_mod7[[1]], intro = results_mod7[[3]])
 
 # rm(res_data)
 
@@ -1482,19 +1482,19 @@ Let us compare models' AIC. Minimum AIC should be model 19.
 
 ```{r}
 print("IC(H,Q) of model 13:")
-vec_p = results_mod13[[3]]
+vec_p = results_mod1[[3]]
 vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod13[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+bbmle::AIC(results_mod1[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
 print("IC(H,Q) of model 19:")
-vec_p = results_mod19[[3]]
+vec_p = results_mod7[[3]]
 vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod19[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+bbmle::AIC(results_mod7[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
 print("Anova:")
-bbmle::anova(results_mod13[[1]], results_mod19[[1]])
+bbmle::anova(results_mod1[[1]], results_mod7[[1]])
 
 ```
 
@@ -1550,25 +1550,25 @@ We fit models 1, 4, 13, 16:
 if(test_method_comp){
   fit_model_1 = test_scenario_5[[2]]
   fit_model_4 = test_scenario_5[[3]]
-  results_mod13 = test_scenario_5[[4]]
-  results_mod16 = test_scenario_5[[5]]
+  results_mod1 = test_scenario_5[[4]]
+  results_mod4 = test_scenario_5[[5]]
 }else{
   fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
 
   fit_model_4 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta", "Sd"), startvar = c("mu", "teta", "delta"))
 
-  results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
+  results_mod1 = EM_algo(modnum=1, numb_rep_algo=1)
 
-  results_mod16 = EM_algo(modnum=16, numb_rep_algo=1)
+  results_mod4 = EM_algo(modnum=4, numb_rep_algo=1)
   
-  test_scenario_5 = list(res_data, fit_model_1, fit_model_4, results_mod13, results_mod16)
+  test_scenario_5 = list(res_data, fit_model_1, fit_model_4, results_mod1, results_mod4)
   save(test_scenario_5, file = "C:/Users/Jonathan/Desktop/test_scenario_5.rdata")
 }
 
 fitplot(fitted_model = fit_model_1, intro = 0)
 fitplot(fitted_model = fit_model_4, intro = 0)
-fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
-fitplot(fitted_model = results_mod16[[1]], intro = results_mod16[[3]])
+fitplot(fitted_model = results_mod1[[1]], intro = results_mod1[[3]])
+fitplot(fitted_model = results_mod4[[1]], intro = results_mod4[[3]])
 
 # rm(res_data)
 
@@ -1584,20 +1584,20 @@ print("AIC of model 4:")
 bbmle::AIC(fit_model_4)
 
 print("IC(H,Q) of model 13:")
-vec_p = results_mod13[[3]]
+vec_p = results_mod1[[3]]
 vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod13[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+bbmle::AIC(results_mod1[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
 print("IC(H,Q) of model 16:")
-vec_p = results_mod16[[3]]
+vec_p = results_mod4[[3]]
 vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod16[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+bbmle::AIC(results_mod4[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
 print("Anovas:")
-bbmle::anova(fit_model_4, results_mod16[[1]])
-bbmle::anova(results_mod13[[1]], results_mod16[[1]])
+bbmle::anova(fit_model_4, results_mod4[[1]])
+bbmle::anova(results_mod1[[1]], results_mod4[[1]])
 
 ```
 
@@ -1656,25 +1656,25 @@ We fit models 1, 4, 13, 16:
 if(test_method_comp){
   fit_model_1 = test_scenario_6[[2]]
   fit_model_4 = test_scenario_6[[3]]
-  results_mod13 = test_scenario_6[[4]]
-  results_mod16 = test_scenario_6[[5]]
+  results_mod1 = test_scenario_6[[4]]
+  results_mod4 = test_scenario_6[[5]]
 }else{
   fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
 
   fit_model_4 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta", "Sd"), startvar = c("mu", "teta", "delta"))
 
-  results_mod13 = EM_algo(modnum=13, numb_rep_algo=1)
+  results_mod1 = EM_algo(modnum=1, numb_rep_algo=1)
 
-  results_mod16 = EM_algo(modnum=16, numb_rep_algo=1)
+  results_mod4 = EM_algo(modnum=4, numb_rep_algo=1)
   
-  test_scenario_6 = list(res_data, fit_model_1, fit_model_4, results_mod13, results_mod16)
+  test_scenario_6 = list(res_data, fit_model_1, fit_model_4, results_mod1, results_mod4)
   save(test_scenario_6, file = "C:/Users/Jonathan/Desktop/test_scenario_6.rdata")
 }
 
 fitplot(fitted_model = fit_model_1, intro = 0)
 fitplot(fitted_model = fit_model_4, intro = 0)
-fitplot(fitted_model = results_mod13[[1]], intro = results_mod13[[3]])
-fitplot(fitted_model = results_mod16[[1]], intro = results_mod16[[3]])
+fitplot(fitted_model = results_mod1[[1]], intro = results_mod1[[3]])
+fitplot(fitted_model = results_mod4[[1]], intro = results_mod4[[3]])
 
 # rm(res_data)
 
@@ -1690,20 +1690,20 @@ print("AIC of model 4:")
 bbmle::AIC(fit_model_4)
 
 print("IC(H,Q) of model 13:")
-vec_p = results_mod13[[3]]
+vec_p = results_mod1[[3]]
 vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod13[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+bbmle::AIC(results_mod1[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
 print("IC(H,Q) of model 16:")
-vec_p = results_mod16[[3]]
+vec_p = results_mod4[[3]]
 vec_p[vec_p == 0] = 1e-7
 vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod16[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+bbmle::AIC(results_mod4[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 
 print("Anovas:")
-bbmle::anova(fit_model_4, results_mod16[[1]])
-bbmle::anova(results_mod13[[1]], results_mod16[[1]])
+bbmle::anova(fit_model_4, results_mod4[[1]])
+bbmle::anova(results_mod1[[1]], results_mod4[[1]])
 
 ```
 
@@ -1712,7 +1712,7 @@ After these tests, we delete the fake resistance data and come back to the true 
 
 ```{r}
 res_data = res_data_saved
-rm(res_data_saved, test_scenario_1, test_scenario_2, test_scenario_3, test_scenario_4, test_scenario_5, test_scenario_6, results_mod13, results_mod19, fit_model_1, fit_model_7)
+rm(res_data_saved, test_scenario_1, test_scenario_2, test_scenario_3, test_scenario_4, test_scenario_5, test_scenario_6, results_mod1, results_mod7, fit_model_1, fit_model_7)
 ```
 
 ## Results
