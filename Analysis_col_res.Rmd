@@ -1246,74 +1246,80 @@ rm(res_data)
 
 #### Scenario 1
 
-We create fake resistance data such that there is no relationship with recent AMU but there are introductions: the resistance follows a normal distribution of mean 0.2 (no introduction) or 0.7 (an introduction occurred).
+We create fake resistance data randomly: there is no relationship between the resistance and explanatory variables.
 
 ```{r, fig.width=7, fig.height=5}
 if(test_method_comp){
   load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_1.rdata")
   res_data = test_scenario_1[[1]]
 }else{
-  res_data = data.frame(S = res_data_saved$S, M = rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.5,0.5)), E = rnorm(n_cyc, 0, 0.05) + base::sample(x = c(0.2,0.7), size = n_cyc, replace = T, prob = c(0.5,0.5)))
+  set.seed(78)
+  res_data = data.frame(S = res_data_saved$S,
+                        M = base::sample(x = c(T,F), size = n_cyc, replace = T, prob = c(0.5,0.5)),
+                        E = base::sample(x = c(T,F), size = n_cyc, replace = T, prob = c(0.5,0.5)))
   rownames(res_data) = rownames(res_data_saved)
-  
-  if(type_mod == "logis"){
-    res_data = as.data.frame(res_data > thresh_res)
-  }
 }
 
 hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
-resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="col")
+resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="allab", tempo_amu="step")
 
 ```
 
-We fit models 1, 7, 13, 19:
+We use the EM algorithm for all models:
 
 ```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
-  results_mod1 = test_scenario_1[[4]]
-  results_mod7 = test_scenario_1[[5]]
+  resul_scenar_1 = test_scenario_1[[2]]
 }else{
 
-  results_mod1 = EM_algo(modnum=1, numb_rep_algo=1)
+  cl<-makeCluster(7)
+  clusterEvalQ(cl, list(library(pracma), library(bbmle)))
+  clusterExport(cl, c("effect_recent_amu","almost_one","thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  resul_scenar_1 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
+  stopCluster(cl)
 
-  results_mod7 = EM_algo(modnum=7, numb_rep_algo=1)
-  
-  test_scenario_1 = list(res_data, results_mod1, results_mod7)
+  test_scenario_1 = list(res_data, resul_scenar_1)
   save(test_scenario_1, file = "C:/Users/Jonathan/Desktop/test_scenario_1.rdata")
 }
 
-fitplot(fitted_model = results_mod1[[1]], intro = results_mod1[[3]])
-fitplot(fitted_model = results_mod7[[1]], intro = results_mod7[[3]])
+fitplot(fitted_model = resul_scenar_1[[1]][[1]], intro = resul_scenar_1[[1]][[3]])
+fitplot(fitted_model = resul_scenar_1[[4]][[1]], intro = resul_scenar_1[[4]][[3]])
+fitplot(fitted_model = resul_scenar_1[[7]][[1]], intro = resul_scenar_1[[7]][[3]])
 
 # rm(res_data)
 
 ```
 
-Let us compare models' AIC. Minimum AIC should be model 13.
+Let us compare models' $IC_{H,Q}$. Minimum $IC_{H,Q}$ should be model 1.
 
 ```{r}
 
-print("IC(H,Q) of model 13:")
-vec_p = results_mod1[[3]]
-vec_p[vec_p == 0] = 1e-7
-vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod1[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+l_Q_fct = l_H_fct = l_numb_par = c()
 
-print("IC(H,Q) of model 19:")
-vec_p = results_mod7[[3]]
-vec_p[vec_p == 0] = 1e-7
-vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod7[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+for(m in 1:12){
+  l_Q_fct[m] = -as.numeric(resul_scenar_1[[m]][[4]])
+  
+  l_numb_par[m] = length(resul_scenar_1[[m]][[1]]@coef)
+  
+  vec_p = resul_scenar_1[[m]][[3]]
+  vec_p[vec_p == 0] = 1e-7
+  vec_p[vec_p == 1] = 1-(1e-7)
+  
+  l_H_fct[m] = sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+}
 
-print("Anova:")
-bbmle::anova(results_mod1[[1]], results_mod7[[1]])
+l_IC_HQ = -2*l_Q_fct + 2*l_H_fct + 2*l_numb_par
+
+print(paste0("Best model: ", which.min(l_IC_HQ)))
+
+rm(l_Q_fct, l_H_fct, l_numb_par, vec_p, l_IC_HQ)
 
 ```
 
 #### Scenario 2
 
-We create fake resistance data such that there is a relationship with recent AMU, but not many "Low use, high resistance" data points that correspond to introductions.
+We create fake resistance data such that there is a relationship between the resistance and recent AMU (2.5 last days):
 
 ```{r, fig.width=7, fig.height=5}
 if(test_method_comp){
@@ -1322,7 +1328,7 @@ if(test_method_comp){
 }else{
 
   mu_fake = -15
-  beta_fake = 3.8
+  beta_fake = 2.5
   alpha_fake = 20
   
   res_data = res_data_saved
@@ -1358,158 +1364,74 @@ if(test_method_comp){
 }
 
 hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
-resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="col", tempo_amu = "step")
+resamu(nwkseff = 3, quantuse=F, lag_amu_init = 1, expo="allab", tempo_amu = "step")
 
 ```
 
-We fit models 1, 7, 13, 19:
+We use the EM algorithm for all models:
 
 ```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
-  results_mod1 = test_scenario_2[[2]]
-  results_mod7 = test_scenario_2[[3]]
+  resul_scenar_2 = test_scenario_2[[2]]
 }else{
 
-  results_mod1 = EM_algo(modnum=1, numb_rep_algo=1)
+  cl<-makeCluster(7)
+  clusterEvalQ(cl, list(library(pracma), library(bbmle)))
+  clusterExport(cl, c("effect_recent_amu","almost_one","thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  resul_scenar_2 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
+  stopCluster(cl)
 
-  results_mod7 = EM_algo(modnum=7, numb_rep_algo=1)
-  
-  test_scenario_2 = list(res_data, results_mod1, results_mod7)
+  test_scenario_2 = list(res_data, resul_scenar_2)
   save(test_scenario_2, file = "C:/Users/Jonathan/Desktop/test_scenario_2.rdata")
 }
 
-fitplot(fitted_model = results_mod1[[1]], intro = results_mod1[[3]])
-fitplot(fitted_model = results_mod7[[1]], intro = results_mod7[[3]])
+fitplot(fitted_model = resul_scenar_2[[1]][[1]], intro = resul_scenar_2[[1]][[3]])
+fitplot(fitted_model = resul_scenar_2[[4]][[1]], intro = resul_scenar_2[[4]][[3]])
+fitplot(fitted_model = resul_scenar_2[[7]][[1]], intro = resul_scenar_2[[7]][[3]])
 
 # rm(res_data)
 
 ```
 
-Let us compare models' AIC. Minimum AIC should be model 7.
+Let us compare models' $IC_{H,Q}$. Minimum $IC_{H,Q}$ should be model 7.
 
 ```{r}
 
-print("IC(H,Q) of model 1:")
-vec_p = results_mod1[[3]]
-vec_p[vec_p == 0] = 1e-7
-vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod1[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+l_Q_fct = l_H_fct = l_numb_par = c()
 
-print("IC(H,Q) of model 7:")
-vec_p = results_mod7[[3]]
-vec_p[vec_p == 0] = 1e-7
-vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod7[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+for(m in 1:12){
+  l_Q_fct[m] = -as.numeric(resul_scenar_2[[m]][[4]])
+  
+  l_numb_par[m] = length(resul_scenar_2[[m]][[1]]@coef)
+  
+  vec_p = resul_scenar_2[[m]][[3]]
+  vec_p[vec_p == 0] = 1e-7
+  vec_p[vec_p == 1] = 1-(1e-7)
+  
+  l_H_fct[m] = sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
+}
 
-print("Anova:")
-bbmle::anova(results_mod1[[1]], results_mod7[[1]])
+l_IC_HQ = -2*l_Q_fct + 2*l_H_fct + 2*l_numb_par
+
+print(paste0("Best model: ", which.min(l_IC_HQ)))
+
+rm(l_Q_fct, l_H_fct, l_numb_par, vec_p, l_IC_HQ)
 
 ```
 
 #### Scenario 3
 
-We create fake resistance data such that there is a relationship with recent AMU. We also add "Low use, high resistance" data points that correspond to introductions.
+We create fake resistance data such that there is a relationship between the resistance and initial AMU (2.5 first days):
 
 ```{r, fig.width=7, fig.height=5}
 if(test_method_comp){
   load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_3.rdata")
   res_data = test_scenario_3[[1]]
 }else{
-  mu_fake = -15
-  beta_fake = 3
-  alpha_fake = 20
-  
-  res_data = res_data_saved
-  fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake-1)/10), teta=0, delta=1, eta=0, Sd=0.1)[["obsdat"]]
-  rm(res_data)
-  fake_res = fake_obsdat$predmod
-  fake_amu = fake_obsdat$amu_t
-  
-  low_use_high_res = NULL #sample(x = which(fake_amu < 0.5), size = round(0.3*sum(fake_res < 0.5)))
-  fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
-
-  low_use_low_res = setdiff(which(fake_amu < 0.5), low_use_high_res)
-  fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
-  
-  high_use_low_res = 35 #sample(x = which(fake_amu >= 0.5), size = 1) #42
-  fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
-  
-  high_use_high_res = setdiff(which(fake_amu >= 0.5), high_use_low_res)
-  fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
-  
-  na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
-  if(length(na_res_val) != 1){
-    print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")
-  }else{
-    fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
-  }
-  
-  res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
-  res_data = as.data.frame(res_data > thresh_res)
-  rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
-}
-
-hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
-resamu(nwkseff = 8, quantuse=F, lag_amu_init = 1, expo="allab", tempo_amu = "step")
-
-```
-
-We fit models 1, 7, 13, 19:
-
-```{r, fig.width=6, fig.height=4}
-
-if(test_method_comp){
-  results_mod1 = test_scenario_3[[2]]
-  results_mod7 = test_scenario_3[[3]]
-}else{
-  results_mod1 = EM_algo(modnum=1, numb_rep_algo=1)
-
-  results_mod7 = EM_algo(modnum=7, numb_rep_algo=1)
-  
-  test_scenario_3 = list(res_data, results_mod1, results_mod7)
-  save(test_scenario_3, file = "C:/Users/Jonathan/Desktop/test_scenario_3.rdata")
-}
-
-fitplot(fitted_model = results_mod1[[1]], intro = results_mod1[[3]])
-fitplot(fitted_model = results_mod7[[1]], intro = results_mod7[[3]])
-
-# rm(res_data)
-
-```
-
-Let us compare models' AIC. Minimum AIC should be model 19.
-
-```{r}
-print("IC(H,Q) of model 13:")
-vec_p = results_mod1[[3]]
-vec_p[vec_p == 0] = 1e-7
-vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod1[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
-
-print("IC(H,Q) of model 19:")
-vec_p = results_mod7[[3]]
-vec_p[vec_p == 0] = 1e-7
-vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod7[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
-
-print("Anova:")
-bbmle::anova(results_mod1[[1]], results_mod7[[1]])
-
-```
-
-#### Scenario 5
-
-We create fake resistance data such that there is a relationship with initial AMU, but not many "Low use, high resistance" data points that correspond to introductions.
-
-```{r, fig.width=7, fig.height=5}
-if(test_method_comp){
-  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_5.rdata")
-  res_data = test_scenario_5[[1]]
-}else{
 
   mu_fake = -15
-  delta_fake = 4
+  delta_fake = 2.5
   teta_fake = 20
   
   res_data = res_data_saved
@@ -1543,167 +1465,55 @@ resamu(nwkseff = 8, quantuse=F, lag_amu_init = 4, expo="col", var_to_plot = "amu
 
 ```
 
-We fit models 1, 4, 13, 16:
+We use the EM algorithm for all models:
 
 ```{r, fig.width=6, fig.height=4}
 
 if(test_method_comp){
-  fit_model_1 = test_scenario_5[[2]]
-  fit_model_4 = test_scenario_5[[3]]
-  results_mod1 = test_scenario_5[[4]]
-  results_mod4 = test_scenario_5[[5]]
+  resul_scenar_3 = test_scenario_3[[2]]
 }else{
-  fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
 
-  fit_model_4 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta", "Sd"), startvar = c("mu", "teta", "delta"))
+  cl<-makeCluster(7)
+  clusterEvalQ(cl, list(library(pracma), library(bbmle)))
+  clusterExport(cl, c("effect_recent_amu","almost_one","thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  resul_scenar_3 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
+  stopCluster(cl)
 
-  results_mod1 = EM_algo(modnum=1, numb_rep_algo=1)
-
-  results_mod4 = EM_algo(modnum=4, numb_rep_algo=1)
-  
-  test_scenario_5 = list(res_data, fit_model_1, fit_model_4, results_mod1, results_mod4)
-  save(test_scenario_5, file = "C:/Users/Jonathan/Desktop/test_scenario_5.rdata")
+  test_scenario_3 = list(res_data, resul_scenar_3)
+  save(test_scenario_3, file = "C:/Users/Jonathan/Desktop/test_scenario_3.rdata")
 }
 
-fitplot(fitted_model = fit_model_1, intro = 0)
-fitplot(fitted_model = fit_model_4, intro = 0)
-fitplot(fitted_model = results_mod1[[1]], intro = results_mod1[[3]])
-fitplot(fitted_model = results_mod4[[1]], intro = results_mod4[[3]])
+fitplot(fitted_model = resul_scenar_3[[1]][[1]], intro = resul_scenar_3[[1]][[3]])
+fitplot(fitted_model = resul_scenar_3[[4]][[1]], intro = resul_scenar_3[[4]][[3]])
+fitplot(fitted_model = resul_scenar_3[[7]][[1]], intro = resul_scenar_3[[7]][[3]])
 
 # rm(res_data)
 
 ```
 
-Let us compare models' AIC. Minimum AIC should be model 4.
+Let us compare models' $IC_{H,Q}$. Minimum $IC_{H,Q}$ should be model 4.
 
 ```{r}
-print("AIC of model 1:")
-bbmle::AIC(fit_model_1)
 
-print("AIC of model 4:")
-bbmle::AIC(fit_model_4)
+l_Q_fct = l_H_fct = l_numb_par = c()
 
-print("IC(H,Q) of model 13:")
-vec_p = results_mod1[[3]]
-vec_p[vec_p == 0] = 1e-7
-vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod1[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
-
-print("IC(H,Q) of model 16:")
-vec_p = results_mod4[[3]]
-vec_p[vec_p == 0] = 1e-7
-vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod4[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
-
-print("Anovas:")
-bbmle::anova(fit_model_4, results_mod4[[1]])
-bbmle::anova(results_mod1[[1]], results_mod4[[1]])
-
-```
-
-#### Scenario 6
-
-We create fake resistance data such that there is a relationship with initial AMU. We also add "Low use, high resistance" data points that correspond to introductions.
-
-```{r, fig.width=7, fig.height=5}
-if(test_method_comp){
-  load("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/Method validation/test_scenario_6.rdata")
-  res_data = test_scenario_6[[1]]
-}else{
-  mu_fake = -15
-  delta_fake = 4
-  teta_fake = 20
+for(m in 1:12){
+  l_Q_fct[m] = -as.numeric(resul_scenar_3[[m]][[4]])
   
-  res_data = res_data_saved
-  fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=0, beta=1, teta=teta_fake, delta=logit((delta_fake-1)/4), eta=0, Sd=0.1)[["obsdat"]]
-  rm(res_data)
-  fake_res = fake_obsdat$predmod
-  fake_amu = fake_obsdat$amu_init
+  l_numb_par[m] = length(resul_scenar_3[[m]][[1]]@coef)
   
-  low_use_high_res = sample(x = which(fake_amu < 2), size = round(0.3*sum(fake_res < 2)))
-  fake_res[low_use_high_res] = rnorm(length(low_use_high_res), 0.8, 0.05)
-
-  low_use_low_res = setdiff(which(fake_amu < 2), low_use_high_res)
-  fake_res[low_use_low_res] = rnorm(length(low_use_low_res), 0.2, 0.05)
+  vec_p = resul_scenar_3[[m]][[3]]
+  vec_p[vec_p == 0] = 1e-7
+  vec_p[vec_p == 1] = 1-(1e-7)
   
-  high_use_low_res = NULL #42 #sample(x = which(fake_amu >= 2), size = 1) #35
-  fake_res[high_use_low_res] = rnorm(length(high_use_low_res), 0.2, 0.05)
-  
-  high_use_high_res = setdiff(which(fake_amu >= 2), high_use_low_res)
-  fake_res[high_use_high_res] = rnorm(length(high_use_high_res), 0.8, 0.05)
-  
-  na_res_val = which(is.na(c(rbind(res_data_saved$M, res_data_saved$E))))
-  if(length(na_res_val) != 1){
-    print("CAUTION: The number of NAs in the true resistance data on 2nd and 3rd samplings is different from 1.")
-  }else{
-    fake_res = c(fake_res[1:(na_res_val-1)], NA, fake_res[na_res_val:length(fake_res)])
-  }
-  
-  res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
-  res_data = as.data.frame(res_data > thresh_res)
-  rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
+  l_H_fct[m] = sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 }
 
-hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
-resamu(nwkseff = 8, quantuse=F, lag_amu_init = 4, expo="col", var_to_plot = "amu_init")
+l_IC_HQ = -2*l_Q_fct + 2*l_H_fct + 2*l_numb_par
 
-```
+print(paste0("Best model: ", which.min(l_IC_HQ)))
 
-We fit models 1, 4, 13, 16:
-
-```{r, fig.width=6, fig.height=4}
-
-if(test_method_comp){
-  fit_model_1 = test_scenario_6[[2]]
-  fit_model_4 = test_scenario_6[[3]]
-  results_mod1 = test_scenario_6[[4]]
-  results_mod4 = test_scenario_6[[5]]
-}else{
-  fit_model_1 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "teta", "delta", "eta", "Sd"), startvar = c("mu"))
-
-  fit_model_4 = rep_est(nrep=20, minusloglrep = run2_intr(0), methodrep = "Nelder-Mead", controlrep = list(maxit = 5000), prev_est = "none", fixedvar = c("lambda1", "lambda2", "alpha", "beta", "eta", "Sd"), startvar = c("mu", "teta", "delta"))
-
-  results_mod1 = EM_algo(modnum=1, numb_rep_algo=1)
-
-  results_mod4 = EM_algo(modnum=4, numb_rep_algo=1)
-  
-  test_scenario_6 = list(res_data, fit_model_1, fit_model_4, results_mod1, results_mod4)
-  save(test_scenario_6, file = "C:/Users/Jonathan/Desktop/test_scenario_6.rdata")
-}
-
-fitplot(fitted_model = fit_model_1, intro = 0)
-fitplot(fitted_model = fit_model_4, intro = 0)
-fitplot(fitted_model = results_mod1[[1]], intro = results_mod1[[3]])
-fitplot(fitted_model = results_mod4[[1]], intro = results_mod4[[3]])
-
-# rm(res_data)
-
-```
-
-Let us compare models' AIC. Minimum AIC should be model 16.
-
-```{r}
-print("AIC of model 1:")
-bbmle::AIC(fit_model_1)
-
-print("AIC of model 4:")
-bbmle::AIC(fit_model_4)
-
-print("IC(H,Q) of model 13:")
-vec_p = results_mod1[[3]]
-vec_p[vec_p == 0] = 1e-7
-vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod1[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
-
-print("IC(H,Q) of model 16:")
-vec_p = results_mod4[[3]]
-vec_p[vec_p == 0] = 1e-7
-vec_p[vec_p == 1] = 1-(1e-7)
-bbmle::AIC(results_mod4[[1]]) + 2*sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
-
-print("Anovas:")
-bbmle::anova(fit_model_4, results_mod4[[1]])
-bbmle::anova(results_mod1[[1]], results_mod4[[1]])
+rm(l_Q_fct, l_H_fct, l_numb_par, vec_p, l_IC_HQ)
 
 ```
 
@@ -1712,7 +1522,7 @@ After these tests, we delete the fake resistance data and come back to the true 
 
 ```{r}
 res_data = res_data_saved
-rm(res_data_saved, test_scenario_1, test_scenario_2, test_scenario_3, test_scenario_4, test_scenario_5, test_scenario_6, results_mod1, results_mod7, fit_model_1, fit_model_7)
+rm(res_data_saved, test_scenario_1, resul_scenar_1, test_scenario_2, resul_scenar_2, test_scenario_3, resul_scenar_3)
 ```
 
 ## Results
