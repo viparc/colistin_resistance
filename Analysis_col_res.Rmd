@@ -642,7 +642,7 @@ resamu = function(nwkseff, quantuse, tempo_amu, ignore.nul=F, lag_amu_init, obj=
   }
   obtab$cycle = as.factor(obtab$cycle)
   
-  obtab$resquali = (obtab$resquanti >= thresh_res)
+  obtab$resquali = (obtab$resquanti >= 0.5)
 
   if(obj == "plot"){
     p = ggplot(data=obtab, aes(x=obtab[,var_to_plot], y=resquanti, col=init))
@@ -651,7 +651,7 @@ resamu = function(nwkseff, quantuse, tempo_amu, ignore.nul=F, lag_amu_init, obj=
     p = p + ggtitle(paste0("Pearson correlation between recent AMU and the measure of resistance: ", round(cor(obtab$amu_t, obtab$resquanti, use="complete.obs"), 3)))
     set.seed(78)
     p = p + geom_jitter(height = 0.25, width = 0)
-    p = p + geom_hline(yintercept = thresh_res, linetype="dashed", col="grey")
+    p = p + geom_hline(yintercept = 0.5, linetype="dashed", col="grey")
     p = p + scale_color_gradient(low = "red", high = "blue")
     # p = ggplotly(p)
     return(p)
@@ -893,8 +893,8 @@ fitplot = function(fitted_model, intro, var_to_plot = "amu_t"){
   print(true_fit_coef)
   
   p = ggplot(obs_vs_pred[[1]], aes(x = resquanti, y = predmod, fill = true_fit_coef["alpha"]*amu_t + true_fit_coef["teta"]*amu_init, col = introduc))
-  p = p + geom_vline(xintercept = thresh_res, linetype = "dashed")
-  p = p + geom_hline(yintercept = thresh_res, linetype = "dashed")
+  p = p + geom_vline(xintercept = 0.5, linetype = "dashed")
+  p = p + geom_hline(yintercept = 0.5, linetype = "dashed")
   p = p + xlab("Observed resistance") + ylab("Predicted resistance")
   p = p + ggtitle(paste0("Observed VS Predicted resistance (minus LogLikelihood =", round(minll, 2), ")"))
   p = p + geom_abline(intercept = 0, slope = 1, linetype = "dashed")
@@ -914,14 +914,14 @@ fitplot = function(fitted_model, intro, var_to_plot = "amu_t"){
     p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = true_fit_coef["eta"]), col = "red")
     p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = amr), col = "green")
     set.seed(78)
-    p2 = p2 + geom_jitter(data = obs_vs_pred[[1]], aes(x = amu_t, y = resquanti, col = introduc, fill = predmod, shape = (predmod>=thresh_res)), size = 3, height = 0.1, width = 0)
+    p2 = p2 + geom_jitter(data = obs_vs_pred[[1]], aes(x = amu_t, y = resquanti, col = introduc, fill = predmod, shape = (predmod>=0.5)), size = 3, height = 0.1, width = 0)
     p2 = p2 + scale_color_gradient(name = "Probability of introduction", low = "green", high = "red")
     p2 = p2 + scale_fill_gradient(name = "Predicted resistance", low = "white", high = "blue")
     p2 = p2 + scale_shape_manual(name = "Predicted resistance (quali)", values = c(21, 22))
     plot(p2)
 
-    print(paste0("Sensitivity: ", sum((obs_vs_pred[[1]]$predmod >= thresh_res) & (obs_vs_pred[[1]]$resquali))/sum(obs_vs_pred[[1]]$resquali)))
-    print(paste0("Specificity: ", sum((obs_vs_pred[[1]]$predmod >= thresh_res) & (obs_vs_pred[[1]]$resquali))/sum(obs_vs_pred[[1]]$predmod >= thresh_res)))
+    print(paste0("Sensitivity: ", sum((obs_vs_pred[[1]]$predmod >= 0.5) & (obs_vs_pred[[1]]$resquali))/sum(obs_vs_pred[[1]]$resquali)))
+    print(paste0("Specificity: ", sum((obs_vs_pred[[1]]$predmod >= 0.5) & (obs_vs_pred[[1]]$resquali))/sum(obs_vs_pred[[1]]$predmod >= 0.5)))
     
     as.numeric(obs_vs_pred[[1]]$resquali)
   }
@@ -945,7 +945,7 @@ fitplot_for_EMalgo = function(fitted_model, intro){
     p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = true_fit_coef["eta"]), col = "red")
     p2 = p2 + geom_line(data=for_curve, aes(x = amu, y = amr), col = "green")
     set.seed(78)
-    p2 = p2 + geom_jitter(data = obs_vs_pred[[1]], aes(x = amu_t, y = resquanti, col = introduc, fill = predmod, shape = (predmod>=thresh_res)), size = 3, height = 0.1, width = 0)
+    p2 = p2 + geom_jitter(data = obs_vs_pred[[1]], aes(x = amu_t, y = resquanti, col = introduc, fill = predmod, shape = (predmod>=0.5)), size = 3, height = 0.1, width = 0)
     p2 = p2 + scale_color_gradient(name = "Probability of introduction", low = "green", high = "red")
     p2 = p2 + scale_fill_gradient(name = "Predicted resistance", low = "white", high = "blue")
     p2 = p2 + scale_shape_manual(name = "Predicted resistance (quali)", values = c(21, 22))
@@ -1250,7 +1250,7 @@ if(test_method_comp){
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("effect_recent_amu","almost_one","thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resul_scenar_1 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
   stopCluster(cl)
 
@@ -1344,7 +1344,7 @@ if(test_method_comp){
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("effect_recent_amu","almost_one","thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resul_scenar_2 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
   stopCluster(cl)
 
@@ -1418,7 +1418,7 @@ if(test_method_comp){
   }
   
   res_data = as.data.frame(cbind(res_data_saved$S, matrix(fake_res, nrow=n_cyc, ncol=2, byrow=T)))
-  rm(beta_fake, alpha_fake, fake_res, na_res_val, fake_obsdat, low_use_high_res, low_use_low_res, high_use_low_res, high_use_high_res)
+  rm(delta_fake, teta_fake, fake_res, na_res_val, fake_obsdat)
 }
 
 hist(as.numeric(as.matrix(res_data)), nclass = 15, col = "royalblue4", main = "Histogram of all resistance data", xlab = "Resistance values")
@@ -1436,7 +1436,7 @@ if(test_method_comp){
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("effect_recent_amu","almost_one","thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resul_scenar_3 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
   stopCluster(cl)
 
@@ -1506,7 +1506,7 @@ if(alread_comp){
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("effect_recent_amu","almost_one","thresh_res","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resulpar = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
   stopCluster(cl)
 
@@ -1580,26 +1580,6 @@ We plot its fit (observed VS predicted):
 ```{r, fig.width=6, fig.height=4}
 
 fitplot(fitted_model = resulpar[[best_model]][[1]], intro = resulpar[[best_model]][[3]])
-
-```
-
-To compare the contributions of variables, we apply this methodology:
-
-For instance, to compare the contributions of variables V1, V2 and V3, we start by comparing the null model (model 1) to the model with V1 only (resp. V2 only and V3 only). Between V1, V2 and V3, the most contributing variable is the one for which the AIC weights ratio with model 1 is the highest, e.g. V3. We also perform a likelihood ratio test between the null model and, in this case, the model with V3 only. Then, we compare the model with V3 only with the model including V3 and V2 (resp. V3 and V1). Between V1 and V2, the second most contributing variable is the one that maximize the AIC weights ratio. Similarly, a likelihood ratio test is performed to test the gain of adding this second variable. At each step, the AIC weights ratio has to be higher than 1, to demonstrate a higher probability of being the best model.
-
-Therefore, we first compare these ratios: [AIC weights of models 2, 4, 7 and 13] /  [AIC weights of model 1]:
-
-```{r}
-print(tab_comp_mod$AIC_weights[2] /tab_comp_mod$AIC_weights[1])
-print(tab_comp_mod$AIC_weights[4] /tab_comp_mod$AIC_weights[1])
-print(tab_comp_mod$AIC_weights[7] /tab_comp_mod$AIC_weights[1])
-print(tab_comp_mod$AIC_weights[13] /tab_comp_mod$AIC_weights[1])
-
-```
-
-```{r}
-print(tab_comp_mod$AIC_weights[best_model] /tab_comp_mod$AIC_weights[13])
-bbmle::anova(resulpar[[best_model]][[1]], resulpar[[1]][[1]])
 
 ```
 
