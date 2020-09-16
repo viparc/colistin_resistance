@@ -762,7 +762,6 @@ $$A_{init,i}(t)=\sum_{j=1}^{\delta}U(j)$$
 ```{r echo=FALSE, fig.width=5.5, fig.height=5.5}
 metramu = data.frame(x = seq(0,10,0.01), exp = 0.95*exp(-log(20)/(10-6))^seq(10,0,-0.01), step = c(rep(0.3, 451), rep(0, 550)))
 p = ggplot(data=metramu, aes(x=x))
-# p = p + ggtitle("Metric for the past use of antibiotics (Si and Lij)")
 p = p + xlab("Time since beginning of production cycle") + ylab("Effect of antimicrobial use")
 p = p + geom_ribbon(aes(ymin=0, ymax=exp), fill="dodgerblue4", alpha=0.2)
 p = p + geom_ribbon(aes(ymin=0, ymax=step), fill="brown", alpha=0.2)
@@ -995,34 +994,45 @@ rep_est = function(nrep, minusloglrep, methodrep, controlrep, prev_est, fixedvar
 
 ### Implementation of the full E-M algorithm
 
-$$Q(\theta,\theta^{(t)}) = E[ln \, P(Y,Z|\theta) \quad |Y,\theta^{(t)}]$$
+$$Q(\theta,\theta^{(s)}) = E[ln \, P(Y,Z|\theta) \quad |Y,\theta^{(s)}]$$
 
 $$\begin{align*}
-Q(\theta,\theta^{(t)})  &= \sum_{m} E[ln \, P(Y_m,Z_m|\theta) \quad |Y_m,\theta^{(t)}] \\
-                    &= \sum_{m} [P(Z_m=0|Y_m,\theta^{(t)}).ln \, P(Z_m=0,Y_m|\theta) \: + \: P(Z_m=1|Y_m,\theta^{(t)}).ln \, P(Z_m=1,Y_m|\theta)]
+Q(\theta,\theta^{(s)})  &= \sum_{m} E[ln \, P(Y_m,Z_m|\theta) \quad |Y_m,\theta^{(s)}] \\
+                    &= \sum_{m} [P(Z_m=0|Y_m,\theta^{(s)}).ln \, P(Z_m=0,Y_m|\theta) \: + \: P(Z_m=1|Y_m,\theta^{(s)}).ln \, P(Z_m=1,Y_m|\theta)]
 \end{align*}$$
+
+And:
+
+$$\theta^{(s+1)} = \underset{\theta}{argmax} (Q(\theta,\theta^{(s)}))$$
+
 
 Therefore:
 $$\begin{align*}
-P(Z_m=1|Y_m,\theta^{(t)}) &= \frac{P(Z_m=1,Y_m|\theta^{(t)})}{P(Y_m|\theta^{(t)})}\\
-                      &= \frac{P(Z_m=1,Y_m|\theta^{(t)})}{P(Z_m=0,Y_m|\theta^{(t)}) \: + \: P(Z_m=1,Y_m|\theta^{(t)})}\\
-                      &= \frac{\eta^{R_m}.(1-\eta)^{1-R_m}}{M_{m,t}^{R_m}.(1-M_{m,t})^{1-R_m} \: + \: \eta^{R_m}.(1-\eta)^{1-R_m}}
+P(Z_m=1|Y_m,\theta^{(s+1)}) &= \frac{P(Z_m=1,Y_m|\theta^{(s+1)})}{P(Y_m|\theta^{(s+1)})}\\
+                      &= \frac{P(Z_m=1,Y_m|\theta^{(s+1)})}{P(Z_m=0,Y_m|\theta^{(s+1)}) \: + \: P(Z_m=1,Y_m|\theta^{(s+1)})}\\
+                      &= \frac{\eta^{R_m}.(1-\eta)^{1-R_m}}{M_{m,s+1}^{R_m}.(1-M_{m,s+1})^{1-R_m} \: + \: \eta^{R_m}.(1-\eta)^{1-R_m}}
 \end{align*}$$ 
-                      
-$$P(Z_m=0|Y_m,\theta^{(t)}) = 1-P(Z_m=1|Y_m,\theta^{(t)})$$
+      
+And:
+                
+$$P(Z_m=0|Y_m,\theta^{(s+1)}) = 1-P(Z_m=1|Y_m,\theta^{(s+1)})$$
 
 And:
 
 $$\begin{align*}
-  Q(\theta,\theta^{(t)}) &= \sum_{m} [P(Z_m=0|Y_m,\theta^{(t)}).ln \, P(Z_m=0,Y_m|\theta) \: + \: P(Z_m=1|Y_m,\theta^{(t)}).ln \, P(Z_m=1,Y_m|\theta)]\\
-                     &= \sum_{m} [P(Z_m=0|Y_m,\theta^{(t)}).ln \, [P(Z_m=0|Y_m,\theta).P(Y_m|\theta)] \: + \: P(Z_m=1|Y_m,\theta^{(t)}).ln \, [P(Z_m=1|Y_m,\theta).P(Y_m|\theta)]]\\
-                     &= \sum_{m} [[ln \, P(Y_m|\theta)].[P(Z_m=0|Y_m,\theta^{(t)})+P(Z_m=1|Y_m,\theta^{(t)})]\\
-                     &\: + \: P(Z_m=0|Y_m,\theta^{(t)}).ln \, P(Z_m=0|Y_m,\theta) \: + \: P(Z_m=1|Y_m,\theta^{(t)}).ln \, P(Z_m=1|Y_m,\theta)]\\
-                     &= \sum_{m} [ln \, P(Y_m|\theta)] \: + \: H(\theta,\theta^{(t)})\\
-                     &= L_{obs}(\theta) \: + \: H(\theta,\theta^{(t)})\\
+  Q(\theta,\theta^{(s)}) &= \sum_{m} [P(Z_m=0|Y_m,\theta^{(s)}).ln \, P(Z_m=0,Y_m|\theta) \: + \: P(Z_m=1|Y_m,\theta^{(s)}).ln \, P(Z_m=1,Y_m|\theta)]\\
+                     &= \sum_{m} [P(Z_m=0|Y_m,\theta^{(s)}).ln \, [P(Z_m=0|Y_m,\theta).P(Y_m|\theta)] \: + \: P(Z_m=1|Y_m,\theta^{(s)}).ln \, [P(Z_m=1|Y_m,\theta).P(Y_m|\theta)]]\\
+                     &= \sum_{m} [[ln \, P(Y_m|\theta)].[P(Z_m=0|Y_m,\theta^{(s)})+P(Z_m=1|Y_m,\theta^{(s)})]\\
+                     &\: + \: P(Z_m=0|Y_m,\theta^{(s)}).ln \, P(Z_m=0|Y_m,\theta) \: + \: P(Z_m=1|Y_m,\theta^{(s)}).ln \, P(Z_m=1|Y_m,\theta)]\\
+                     &= \sum_{m} [ln \, P(Y_m|\theta)] \: + \: H(\theta,\theta^{(s)})\\
+                     &= L_{obs}(\theta) \: + \: H(\theta,\theta^{(s)})\\
 \end{align*}$$
 
-$$H(\theta,\theta^{(t)})= \sum_{m} [P(Z_m=0|Y_m,\theta^{(t)}).ln \, P(Z_m=0|Y_m,\theta) \: + \: P(Z_m=1|Y_m,\theta^{(t)}).ln \, P(Z_m=1|Y_m,\theta)]$$
+And :
+
+$$H(\theta,\theta^{(s)})= \sum_{m} [P(Z_m=0|Y_m,\theta^{(s)}).ln \, P(Z_m=0|Y_m,\theta) \: + \: P(Z_m=1|Y_m,\theta^{(s)}).ln \, P(Z_m=1|Y_m,\theta)]$$
+
+And:
 
 $$Q(\theta^*,\theta^*)= L_{obs}(\theta^*) \: + \: H(\theta^*,\theta^*)$$
 
@@ -1499,7 +1509,7 @@ We repeat the algorithm 5 times (with different seeds) per model, and each maxim
 
 if(alread_comp){
   
-  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - Exp - Diff/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_all.rdata"))
+  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - Exp - Diff/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_c", conc_used, "_all.rdata"))
   
 }else{
   t = as.numeric(Sys.time())
@@ -1507,10 +1517,10 @@ if(alread_comp){
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
   clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resulpar = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
+  resulpar = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=4, plot_step=F)
   stopCluster(cl)
 
-  save(resulpar, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_all.rdata"))
+  save(resulpar, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_c", conc_used, "_all.rdata"))
 
   as.numeric(Sys.time()) - t
   
@@ -1635,6 +1645,11 @@ prob_intro_farms = data.frame(Farm = resulpar[[max_AICweight_intro_model]][[7]],
 prob_intro_farms$Farm = rownames(weeks_samp)[prob_intro_farms$Farm]
 prob_intro_farms$Farm = substr(prob_intro_farms$Farm, 1, 3)
 prob_intro_farms$Obs_res = as.character(fitplot(fitted_model = resulpar[[best_model]][[1]], intro = resulpar[[best_model]][[3]]))
+
+if(any(prob_intro_farms$Prob > 0.75 & prob_intro_farms$Obs_res == 0)){
+  print("CAUTION: Some data point is susceptible but has a high probability of introduction")
+}
+
 ```
 
 We add GPS information to `prob_intro_farms`.
@@ -2057,7 +2072,7 @@ pA = pA + ggsn::scalebar(dist = 5, location = "bottomleft", dist_unit = "km", tr
 pA = pA + theme(legend.position = "top")
 pA = pA + blank()
 
-pB = local_moran(decay_param = 1, decay_fun = "exp", p_val = 0.05, style_weight = "W")[[2]]
+pB = local_moran(decay_param = 2.3, decay_fun = "thresh", p_val = 0.05, style_weight = "W")[[2]]
 
 pC = ggplot()
 pC = pC  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
