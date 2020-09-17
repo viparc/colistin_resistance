@@ -582,8 +582,12 @@ resamu = function(nwkseff, quantuse, tempo_amu, ignore.nul=F, lag_amu_init, obj=
   for(cyc_i in 1:n_cyc){
     for(time_i in 2:3){
       
-      first_amu_week_consid = max(1, weeks_samp[cyc_i, time_i] - nwkseff - 1)
+      first_amu_week_consid = as.numeric(weeks_samp[cyc_i, time_i] - nwkseff - 1)
       last_amu_week_consid = as.numeric(weeks_samp[cyc_i, time_i] - 1)
+      
+      if(first_amu_week_consid <= 0){
+        save(first_amu_week_consid, file = paste0("C:/Users/Jonathan/Desktop/CAUTION - In function resamu first_amu_week_consid=", first_amu_week_consid, ".txt"))
+      }
       
       if(expo == "allab"){
         use_quali = allab_expo
@@ -594,7 +598,7 @@ resamu = function(nwkseff, quantuse, tempo_amu, ignore.nul=F, lag_amu_init, obj=
       }
       
       if(tempo_amu %in% c("step", "linear")){
-        inc_wks = floor(first_amu_week_consid):last_amu_week_consid
+        inc_wks = ceil(first_amu_week_consid):last_amu_week_consid
       }else if(tempo_amu == "exp_decay"){
         inc_wks = 1:last_amu_week_consid
       }
@@ -614,9 +618,7 @@ resamu = function(nwkseff, quantuse, tempo_amu, ignore.nul=F, lag_amu_init, obj=
         amu_t = amu_t * time_eff
       }
       
-      if((tempo_amu %in% c("step", "linear")) & (ceil(first_amu_week_consid) - first_amu_week_consid != 0)){
-        amu_t[floor(first_amu_week_consid)] = amu_t[floor(first_amu_week_consid)] * (ceil(first_amu_week_consid) - first_amu_week_consid)
-      }
+      amu_t[inc_wks[1]] = amu_t[inc_wks[1]] * (inc_wks[1] - first_amu_week_consid)
       
       amu_t = sum(amu_t)
       
@@ -625,9 +627,9 @@ resamu = function(nwkseff, quantuse, tempo_amu, ignore.nul=F, lag_amu_init, obj=
       # }
       
       if(quantuse){
-        amu_init = c(use_quanti[cyc_i, (1:floor(lag_amu_init))], (lag_amu_init - floor(lag_amu_init)) * use_quanti[cyc_i, ceiling(lag_amu_init)])
+        amu_init = c(use_quanti[cyc_i, (1:floor(lag_amu_init))], as.numeric((lag_amu_init - floor(lag_amu_init)) * use_quanti[cyc_i, ceiling(lag_amu_init)]))
       }else{
-        amu_init = c(use_quali[cyc_i, (1:floor(lag_amu_init))], (lag_amu_init - floor(lag_amu_init)) * use_quali[cyc_i, ceiling(lag_amu_init)])
+        amu_init = c(use_quali[cyc_i, (1:floor(lag_amu_init))], as.numeric((lag_amu_init - floor(lag_amu_init)) * use_quali[cyc_i, ceiling(lag_amu_init)]))
       }
       
       amu_init = sum(amu_init)
@@ -833,8 +835,8 @@ We also define `run2_intr` which is a wraper: its output is the function `run2` 
 ```{r}
 run2 = function(aim="est", intr=introd, mu, lambda1, lambda2, alpha, beta, teta, delta, eta){
 
-  beta = 4 * sigmoid(beta)
-  delta = 4 * sigmoid(delta) +1
+  beta = 5 * sigmoid(beta)
+  delta = 5 * sigmoid(delta)
   eta = almost_one
 
   obsdat = resamu(nwkseff=beta, quantuse=amu_model_is_quanti, tempo_amu=effect_recent_amu, ignore.nul=F, lag_amu_init=delta, obj="est", expo=definition_amu)
@@ -1204,7 +1206,7 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.01, max.step=100000000000, pl
     repetalgo_minloglik[algorep_ite] = minloglik
   }
   
-  save(repetalgo, file = paste0("C:/Users/Jonathan/Desktop/resul_", definition_amu, "_isquanti", amu_model_is_quanti, "_mod_", modnum, ".rdata"))
+  save(repetalgo, file = paste0("C:/Users/Jonathan/Desktop/resul_mod", modnum, "_", definition_amu, "_isquanti", amu_model_is_quanti, "_", effect_recent_amu, "_c", conc_used, ".rdata"))
 
   repetalgo[[which.min(repetalgo_minloglik)]]
 }
@@ -1261,7 +1263,7 @@ if(test_method_comp){
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
   clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resul_scenar_1 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
+  resul_scenar_1 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=4, plot_step=F)
   stopCluster(cl)
 
   test_scenario_1 = list(res_data, resul_scenar_1)
@@ -1318,7 +1320,7 @@ if(test_method_comp){
   alpha_fake = 20
   
   res_data = res_data_saved
-  fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake)/4), teta=0, delta=1, eta=0)[["obsdat"]]
+  fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=alpha_fake, beta=logit((beta_fake)/5), teta=0, delta=1, eta=0)[["obsdat"]]
   rm(res_data)
   fake_res = fake_obsdat$predmod >=0.5
   fake_amu = fake_obsdat$amu_t
@@ -1355,7 +1357,7 @@ if(test_method_comp){
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
   clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resul_scenar_2 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
+  resul_scenar_2 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=4, plot_step=F)
   stopCluster(cl)
 
   test_scenario_2 = list(res_data, resul_scenar_2)
@@ -1412,7 +1414,7 @@ if(test_method_comp){
   teta_fake = 20
   
   res_data = res_data_saved
-  fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=0, beta=1, teta=teta_fake, delta=logit((delta_fake-1)/4), eta=0)[["obsdat"]]
+  fake_obsdat = run2(aim="pred", intr=0, mu=mu_fake, lambda1=0, lambda2=0, alpha=0, beta=1, teta=teta_fake, delta=logit((delta_fake)/5), eta=0)[["obsdat"]]
   rm(res_data)
   fake_res = fake_obsdat$predmod >=0.5
   fake_amu = fake_obsdat$amu_t
@@ -1447,7 +1449,7 @@ if(test_method_comp){
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
   clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resul_scenar_3 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=1, plot_step=F)
+  resul_scenar_3 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=4, plot_step=F)
   stopCluster(cl)
 
   test_scenario_3 = list(res_data, resul_scenar_3)
@@ -1509,18 +1511,18 @@ We repeat the algorithm 5 times (with different seeds) per model, and each maxim
 
 if(alread_comp){
   
-  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - Exp - Diff/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_c", conc_used, "_all.rdata"))
+  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - ", effect_recent_amu, "/c=", conc_used, "/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_", effect_recent_amu, "_c", conc_used, "_all.rdata"))
   
 }else{
   t = as.numeric(Sys.time())
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("conc_used","effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resulpar = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=4, plot_step=F)
   stopCluster(cl)
 
-  save(resulpar, file = paste0("C:/Users/Jonathan/Desktop/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_c", conc_used, "_all.rdata"))
+  save(resulpar, file = paste0("C:/Users/Jonathan/Desktop/resulpar_all_", definition_amu, "_isquanti", amu_model_is_quanti, "_", effect_recent_amu, "_c", conc_used, ".rdata"))
 
   as.numeric(Sys.time()) - t
   
