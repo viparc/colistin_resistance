@@ -585,7 +585,7 @@ resamu = function(nwkseff, quantuse, tempo_amu, ignore.nul=F, lag_amu_init, obj=
   for(cyc_i in 1:n_cyc){
     for(time_i in 2:3){
       
-      first_amu_week_consid = as.numeric(weeks_samp[cyc_i, time_i] - nwkseff - 1)
+      first_amu_week_consid = as.numeric(weeks_samp[cyc_i, time_i] - nwkseff - 1) + (1-almost_one)
       last_amu_week_consid = as.numeric(weeks_samp[cyc_i, time_i] - 1)
       
       if(first_amu_week_consid <= 0){
@@ -1264,7 +1264,7 @@ if(test_method_comp){
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("conc_used","effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resul_scenar_1 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=4, plot_step=F)
   stopCluster(cl)
 
@@ -1358,7 +1358,7 @@ if(test_method_comp){
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("conc_used","effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resul_scenar_2 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=4, plot_step=F)
   stopCluster(cl)
 
@@ -1450,7 +1450,7 @@ if(test_method_comp){
 
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
-  clusterExport(cl, c("effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
+  clusterExport(cl, c("conc_used","effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
   resul_scenar_3 = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=4, plot_step=F)
   stopCluster(cl)
 
