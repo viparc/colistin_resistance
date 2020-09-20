@@ -101,8 +101,8 @@ definition_amu = "allab"
 amu_model_is_quanti = F
 type_mod = "logis"
 effect_recent_amu = "step"
-alread_comp = F
-test_method_comp = F
+alread_comp = T
+test_method_comp = T
 almost_one = 0.999
 conc_used = 1
 
@@ -1513,7 +1513,7 @@ We repeat the algorithm 5 times (with different seeds) per model, and each maxim
 
 if(alread_comp){
   
-  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - ", effect_recent_amu, "/c=", conc_used, "/resulpar_", definition_amu, "_isquanti", amu_model_is_quanti, "_", effect_recent_amu, "_c", conc_used, "_all.rdata"))
+  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - ", effect_recent_amu, "/c=", conc_used, "/resulpar_all_", definition_amu, "_isquanti", amu_model_is_quanti, "_", effect_recent_amu, "_c", conc_used, ".rdata"))
   
 }else{
   t = as.numeric(Sys.time())
@@ -1599,7 +1599,7 @@ fitplot(fitted_model = resulpar[[best_model]][[1]], intro = resulpar[[best_model
 
 We plot a figure showing the models in the order of decreasing AIC weight, and the cumulative AIC weight tending to 100%. The variables included for each model are plotted above:
 
-```{r}
+```{r, fig.width=6, fig.height=4}
 val_ICHQ = data.frame(mod = 1:12, IC_HQ = l_IC_HQ, rec_amu = NA, init_amu = NA, first_samp = NA, prev_samp = NA)
 
 gap_minmax = max(l_IC_HQ) - min(l_IC_HQ)
@@ -1990,7 +1990,7 @@ local_moran = function(decay_param, decay_fun, p_val, style_weight, vis_spat_wei
     p1 = p1 + geom_tile(data = heat_map_grid, aes(x = Long, y = Lat, alpha = decay), fill = "forestgreen")
     p1 = p1 + scale_alpha_continuous(name = "Value in the weight matrix:", range = c(0,1))
   }
-  p1 = p1 + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
+  # p1 = p1 + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
   set.seed(78)
   p1 = p1 + geom_jitter(data = prob_intro_farms[! is.na(prob_intro_farms$Prob),], aes(x = Long, y = Lat, fill = cluster), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
   p1 = p1 + ggsn::scalebar(dist = 5, location = "bottomleft", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
@@ -2063,24 +2063,25 @@ shinyApp(ui=ui, server=server)
 
 We plot on a same figure the probability of contamination for each cycle, and the local clusters using local Moran's I:
 
-```{r}
+```{r, fig.width=12, fig.height=5.3}
 library(ggpubr)
 pA = ggplot()
 pA = pA  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
-pA = pA + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
+# pA = pA + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
 set.seed(78)
 pA = pA + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
-pA = pA + scale_fill_gradient2(name = "Probability of contamination:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
+pA = pA + scale_fill_gradient2(name = "Probability of unexplained infection:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
 # pA = pA + scale_alpha_continuous(name = "Value in the weight matrix:", range = c(0,1))
 pA = pA + ggsn::scalebar(dist = 5, location = "bottomleft", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
 pA = pA + theme(legend.position = "top")
+pA = pA  + guides(fill = guide_colourbar(title.position="top"))
 pA = pA + blank()
 
-pB = local_moran(decay_param = 2.3, decay_fun = "thresh", p_val = 0.05, style_weight = "W")[[2]]
+pB = local_moran(decay_param = 2.3, decay_fun = "thresh", p_val = 0.05, style_weight = "W", vis_spat_weight = F)[[2]]
 
 pC = ggplot()
 pC = pC  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
-pC = pC + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
+# pC = pC + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
 set.seed(78)
 pC = pC + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Obs_res), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
 pC = pC + scale_fill_manual(name = "Observed resistance:", values = c("0" = "dodgerblue", "1" = "red"), labels = c("0" = "Sensitive", "1" = "Resistant"))
@@ -2094,7 +2095,7 @@ prob_intro_farms$categ[which(prob_intro_farms$Prob > 0.75)] = "Sink"
 
 pD = ggplot()
 pD = pD  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
-pD = pD + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
+# pD = pD + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
 set.seed(78)
 pD = pD + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = categ), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
 # pD = pD + scale_fill_manual(name = "Observed resistance:", values = c("0" = "dodgerblue", "1" = "red"), labels = c("0" = "Sensitive", "1" = "Resistant"))
@@ -2103,7 +2104,8 @@ pD = pD + theme(legend.position = "top", legend.direction = "vertical")
 pD = pD + blank()
 
 
-com_plot = ggarrange(pC, pA, pB, pD, nrow = 2, ncol = 2, labels = c("A", "B", "C"))
+# com_plot = ggarrange(pC, pA, pB, pD, nrow = 2, ncol = 2, labels = c("A", "B", "C", "D))
+com_plot = ggarrange(pC, pA, pB, nrow = 1, ncol = 3, labels = c("A", "B", "C"))
 plot(com_plot)
 
 ```
