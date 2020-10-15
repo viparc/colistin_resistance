@@ -447,7 +447,7 @@ rm(i, wk, weeks_col_use, weeks_col_no_use, weeks_allab_use, weeks_allab_no_use, 
 
 We plot the AMU and sampling dates for the `n_cyc` cycles. We also plot an example of the growth curves available for each sample, and the area between two curves (indicator of resistance).
 
-```{r, fig.width=8, fig.height=6, fig.retina=2}
+```{r, fig.width=8, fig.height=7, fig.retina=2}
 plot(x=c(0,0.1), y=c(0,0), xlim=c(0,ncol(col_expo)+8), ylim=c(0,n_cyc+10), type="l", xlab="Weeks", ylab="", axes=F)
 axis(side = 1)
 title(ylab="Cycles", mgp=c(0,1,0))
@@ -455,23 +455,30 @@ title(ylab="Cycles", mgp=c(0,1,0))
 for (i in 1:n_cyc){
   for (j in 1:max(which(! is.na(col_expo[i,])))){
     
-    rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "bisque", border="grey")
+    rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "bisque", border = "grey")
     
-    if ((!(is.na(col_expo[i,j]))) & (col_expo[i,j] == 1) & (allab_expo[i,j] == 1)){
-      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "coral3", border="grey")
-    }else if ((!(is.na(col_expo[i,j]))) & (col_expo[i,j] == 0) & (allab_expo[i,j] == 1)){
-      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "deepskyblue4", border="grey")
+    if ((!(is.na(col_expo[i,j]))) & (allab_expo[i,j] == 1)){
+      rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "coral3", border = "grey")
     }
+    
+    # if ((!(is.na(col_expo[i,j]))) & (col_expo[i,j] == 1) & (allab_expo[i,j] == 1)){
+    #   rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "coral3", border = "grey")
+    # }else if ((!(is.na(col_expo[i,j]))) & (col_expo[i,j] == 0) & (allab_expo[i,j] == 1)){
+    #   rect(xleft = j-0.5, xright = j+0.5, ybottom = i-0.5, ytop = i+0.5, col = "deepskyblue4", border = "grey")
+    # }
 
     if (any(weeks_samp[i,] == j, na.rm=T)){
       if (is.finite(res_data[i, which(weeks_samp[i,] == j)])){
-        lines(x = c(j, j), y = c(i-0.5, i+0.5), col = "black", lwd = 2)
+        lines(x = c(j+0.5, j-0.5), y = c(i-0.5, i+0.5), col = "black", lwd = 2)
+        lines(x = c(j-0.5, j+0.5), y = c(i-0.5, i+0.5), col = "black", lwd = 2)
       }
     }
   }
 }
 
-legend(x=0, y=n_cyc+7, inset=0.5, legend=c("Antimicrobials used, including colistin", "Non-colistin antimicrobials used", "No antimicrobials used"), fill=c("coral3", "deepskyblue4", "bisque"), cex = 0.8, bty = "n")
+legend(x=0, y=n_cyc+4, inset=0.5, legend=c("Antimicrobials used", "No antimicrobials used"), fill=c("coral3", "bisque"), cex = 0.8, bty = "n")
+
+# legend(x=0, y=n_cyc+7, inset=0.5, legend=c("Antimicrobials used, including colistin", "Non-colistin antimicrobials used", "No antimicrobials used"), fill=c("coral3", "deepskyblue4", "bisque"), cex = 0.8, bty = "n")
 
     
 # Only for figure:
@@ -488,16 +495,16 @@ p2 = ggplot(data = for_fig_panel, aes(x=Time, y=od, group=Conc., label=lab))
 p2 = p2 + xlab("Time (hours)") + ylab("OD")
 p2 = p2 + geom_ribbon(data = for_fig_panel[for_fig_panel$Conc. == 1,], aes(x = Time, ymin = od, ymax=for_fig_panel$od[for_fig_panel$Conc. == 0]), alpha=0.2, fill="chartreuse4")
 p2 = p2 + geom_line(col="black", size=1)
-p2 = p2 + geom_label_repel(data = for_fig_panel[for_fig_panel$Time == 70,], xlim = c(10, 11), ylim = c(0.65, 1.4), direction = "y", hjust = 0)
+p2 = p2 + geom_label_repel(data = for_fig_panel[for_fig_panel$Time == 70,], xlim = c(3, 4), ylim = c(0.6, 1.4), direction = "y", hjust = 0)
 p2 = p2 + theme_classic() + theme(legend.position="none",
                              plot.background=element_rect(colour ="black"),
                              plot.margin = unit(c(0.2, 0.2, 0.1, 0.1), "cm"))
 
-print(p2, vp=viewport(width = 0.3, height = 0.3, x = 0.98, y = 0.38, just = c("right", "bottom")))
+print(p2, vp=viewport(width = 0.26, height = 0.26, x = 0.99, y = 0.35, just = c("right", "bottom")))
 
-lines(x=c(weeks_samp["0625",3], 23), y=c(16, 16.5), lwd=1)
+lines(x=c(weeks_samp["0625",3], 22.85), y=c(13, 13), lwd=1)
 
-rm(i, j, p2, gcur, for_fig_panel)
+# rm(i, j, p2, gcur, for_fig_panel)
 ```
 
 ## Resistance and AMU over time
@@ -1146,13 +1153,13 @@ Convergence is defined as: the distance between the likelihood and the former li
 EM_algo <- function(modnum, numb_rep_algo=5, tol=0.01, max.step=10000, plot_step=T, init_p = 0.01) {
 
   repetalgo = list()
-  repetalgo_minloglik = c()
+  repetalgo_mincomploglik = c()
   
   for(algorep_ite in 1:numb_rep_algo){
     print(paste0("##### Model ", modnum, " (repetition ", algorep_ite, "/", numb_rep_algo, " of the algorithm) #####")); cat("\n")
     
     step = 0
-    minloglik = 10^6
+    mincomploglik = 10^6
     
     raw_params = "none"
     
@@ -1178,8 +1185,8 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.01, max.step=10000, plot_step
       # if(step == 1){
       #   raw_params["eta"] = 5
       # }
-      old.minloglik = minloglik
-      minloglik = output_mstep[[2]]
+      old.mincomploglik = mincomploglik
+      mincomploglik = output_mstep[[2]]
       modstep = output_mstep[[3]]
       param_true_format = output_mstep[[4]]
       cycle_id = output_mstep[[5]]
@@ -1187,14 +1194,14 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.01, max.step=10000, plot_step
       if(plot_step){
         fitplot_for_EMalgo(modstep, introductions)
       }
-      Q_val = -minloglik
+      Q_val = -mincomploglik
       print(paste("Complete data LogLikelihood (Q function):", Q_val))
       H_val = sum(introductions * log(introductions) + (1-introductions) * log(1-introductions))
       print(paste("H function:", H_val))
       obs_ll = Q_val - H_val
       print(paste("Observed data LogLikelihood (Q-H):", obs_ll))
 
-      if (abs(minloglik - old.minloglik) < tol){
+      if (abs(mincomploglik - old.mincomploglik) < tol){
         counting_for_convergence = counting_for_convergence +1
       }else{
         counting_for_convergence = 0
@@ -1204,13 +1211,13 @@ EM_algo <- function(modnum, numb_rep_algo=5, tol=0.01, max.step=10000, plot_step
     
     if(step == max.step+1){write.table(c(), file=paste0("C:/Users/Jonathan/Desktop/Model ", modnum, ", iteration ", algorep_ite, " out of ", numb_rep_algo, " - no convergence of the likelihood"))}
 
-    repetalgo[[algorep_ite]] = list(modstep, raw_params, introductions, minloglik, param_true_format, number_obs=length(obs_res), cycle_id)
-    repetalgo_minloglik[algorep_ite] = minloglik
+    repetalgo[[algorep_ite]] = list(modstep, raw_params, introductions, mincomploglik, param_true_format, number_obs=length(obs_res), cycle_id, obs_ll)
+    repetalgo_mincomploglik[algorep_ite] = mincomploglik
   }
   
   save(repetalgo, file = paste0("C:/Users/Jonathan/Desktop/resul_mod", modnum, "_", definition_amu, "_isquanti", amu_model_is_quanti, "_", effect_recent_amu, "_c", conc_used, ".rdata"))
 
-  repetalgo[[which.min(repetalgo_minloglik)]]
+  repetalgo[[which.min(repetalgo_mincomploglik)]]
 }
 ```
 
@@ -1292,9 +1299,7 @@ for(m in 1:12){
   l_numb_par[m] = length(resul_scenar_1[[m]][[1]]@coef)
   
   vec_p = resul_scenar_1[[m]][[3]]
-  vec_p[vec_p == 0] = 1e-7
-  vec_p[vec_p == 1] = 1-(1e-7)
-  
+
   l_H_fct[m] = sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 }
 
@@ -1386,9 +1391,7 @@ for(m in 1:12){
   l_numb_par[m] = length(resul_scenar_2[[m]][[1]]@coef)
   
   vec_p = resul_scenar_2[[m]][[3]]
-  vec_p[vec_p == 0] = 1e-7
-  vec_p[vec_p == 1] = 1-(1e-7)
-  
+
   l_H_fct[m] = sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 }
 
@@ -1478,9 +1481,7 @@ for(m in 1:12){
   l_numb_par[m] = length(resul_scenar_3[[m]][[1]]@coef)
   
   vec_p = resul_scenar_3[[m]][[3]]
-  vec_p[vec_p == 0] = 1e-7
-  vec_p[vec_p == 1] = 1-(1e-7)
-  
+
   l_H_fct[m] = sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 }
 
@@ -1521,7 +1522,7 @@ if(alread_comp){
   cl<-makeCluster(7)
   clusterEvalQ(cl, list(library(pracma), library(bbmle)))
   clusterExport(cl, c("conc_used","effect_recent_amu","almost_one","type_mod","definition_amu","amu_model_is_quanti","E_step","M_step","rep_est","run2","run2_intr","resamu","n_cyc","res_data","weeks_samp","col_expo","col_expo_quanti","allab_expo","allab_expo_quanti"))
-  resulpar = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=4, plot_step=F)
+  resulpar = parLapply(cl, X=1:12, fun=EM_algo, numb_rep_algo=10, plot_step=F)
   stopCluster(cl)
 
   save(resulpar, file = paste0("C:/Users/Jonathan/Desktop/resulpar_all_", definition_amu, "_isquanti", amu_model_is_quanti, "_", effect_recent_amu, "_c", conc_used, ".rdata"))
@@ -1552,9 +1553,7 @@ for(m in 1:12){
   l_numb_par[m] = length(resulpar[[m]][[1]]@coef)
   
   vec_p = resulpar[[m]][[3]]
-  vec_p[vec_p == 0] = 1e-7
-  vec_p[vec_p == 1] = 1-(1e-7)
-  
+
   l_H_fct[m] = sum(vec_p * log(vec_p) + (1-vec_p) * log(1-vec_p))
 }
 
@@ -1667,7 +1666,26 @@ We load the data on commune borders in the districts of ViParc study:
 
 ```{r, label="Load commune borders data"}
 sf_file = readOGR("C:/Users/Jonathan/Desktop/Programmes/amr_vietnam/Shapefiles/VN National Commune_new.shp")
-sf_file_df = fortify(sf_file[sf_file$D_CODE %in% c(866, 872, 873),])
+sf_stud_reg = sf_file[sf_file$D_CODE %in% c(872, 873),]
+sf_file_df = fortify(sf_stud_reg)
+
+sf_stud_reg@data$id = names(table(sf_file_df$id))
+
+sf_file_df <- base::merge(x=sf_file_df, y=sf_stud_reg@data[,c(1:9, which(colnames(sf_stud_reg@data) == "id"))], by="id", all.x=T)
+sf_file_df$C_NAMEEN = as.character(sf_file_df$C_NAMEEN)
+sf_file_df$C_NAMEEN[sf_file_df$C_CODE == 30037] = "My An Town"
+sf_file_df$C_NAMEEN[sf_file_df$C_CODE == 30076] = "My Tho Town"
+
+# popdat = readRDS("C:/Users/Jonathan/Desktop/Programmes/colistin_resistance/census2019.rds")
+# popdat = aggregate(n ~ province + district + commune, data=popdat, FUN=sum)
+# popdat = popdat[popdat$district %in% unique(popdat$district)[grep("ao Lã|p M", unique(popdat$district))],]
+# for(i in 1:nrow(popdat)){print(popdat$commune[i]) ; print(popdat$n[i])}
+
+datdens = as.data.frame(read_excel("C:/Users/Jonathan/Desktop/Programmes/colistin_resistance//Table_data_commune.xlsx"))
+
+sf_file_df = merge(x=sf_file_df, y=datdens, by.x="C_NAMEEN", by.y="Commune")
+
+ggplot() + geom_polygon(data = VN, aes(x = long, y = lat, group = group), color = 'black', fill = 'lemonchiffon', size = .2) + geom_polygon(data = VN2, aes(x = long, y = lat, group = group), color = 'black', fill = NA, size = 1.2)
 
 ```
 
@@ -2066,11 +2084,12 @@ We plot on a same figure the probability of contamination for each cycle, and th
 ```{r, fig.width=12, fig.height=5.3}
 library(ggpubr)
 pA = ggplot()
-pA = pA  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
+pA = pA  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id, fill = a_weight/Area), col="black", size=0.5)
 # pA = pA + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
 set.seed(78)
-pA = pA + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Prob), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
-pA = pA + scale_fill_gradient2(name = "Probability of unexplained infection:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
+pA = pA + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, col = Prob), shape = 16, size = 3, width = 0.006, height = 0.006)
+pA = pA + scale_color_gradient2(name = "Probability of unexplained infection:", low = "dodgerblue", mid = "white", high = "red", midpoint = 0.5, limits = c(0, 1))
+pA = pA + scale_fill_gradient2(name = "Livestock weight (tonnes) per km²", low = "white", high = "brown")
 # pA = pA + scale_alpha_continuous(name = "Value in the weight matrix:", range = c(0,1))
 pA = pA + ggsn::scalebar(dist = 5, location = "bottomleft", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
 pA = pA + theme(legend.position = "top")
@@ -2080,11 +2099,12 @@ pA = pA + blank()
 pB = local_moran(decay_param = 2.3, decay_fun = "thresh", p_val = 0.05, style_weight = "W", vis_spat_weight = F)[[2]]
 
 pC = ggplot()
-pC = pC  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id), col="black", size=0.5, fill = "beige")
+pC = pC  + geom_polygon(data = sf_file_df, aes(x = long, y = lat, group = id, fill = a_weight/Area), col="black", size=0.5)
 # pC = pC + geom_point(data = gps_farms, aes(x = Long, y = Lat), col = "black", size = 0.75)
 set.seed(78)
-pC = pC + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, fill = Obs_res), col = "black", shape = 21, size = 3, width = 0.006, height = 0.006)
-pC = pC + scale_fill_manual(name = "Observed resistance:", values = c("0" = "dodgerblue", "1" = "red"), labels = c("0" = "Sensitive", "1" = "Resistant"))
+pC = pC + geom_jitter(data = prob_intro_farms, aes(x = Long, y = Lat, col = Obs_res), shape = 16, size = 3, width = 0.006, height = 0.006)
+pC = pC + scale_color_manual(name = "Observed resistance:", values = c("0" = "dodgerblue", "1" = "red"), labels = c("0" = "Sensitive", "1" = "Resistant"))
+pC = pC + scale_fill_gradient2(name = "Livestock weight (tonnes) per km²", low = "white", high = "brown")
 pC = pC + ggsn::scalebar(dist = 5, location = "bottomleft", dist_unit = "km", transform = TRUE, model = "WGS84", x.min = min(sf_file_df$long), x.max = max(sf_file_df$long), y.min = min(sf_file_df$lat), y.max = max(sf_file_df$lat))
 pC = pC + theme(legend.position = "top", legend.direction = "vertical")
 pC = pC + blank()
