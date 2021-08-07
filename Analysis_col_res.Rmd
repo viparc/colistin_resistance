@@ -1515,7 +1515,7 @@ We repeat the algorithm 5 times (with different seeds) per model, and each maxim
 
 if(alread_comp){
   
-  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - ", effect_recent_amu, "/c=", conc_used, "/resulpar_all_", definition_amu, "_isquanti", amu_model_is_quanti, "_", effect_recent_amu, "_c", conc_used, ".rdata"))
+  load(paste0("C:/Users/Jonathan/Desktop/Resultats simulations/colistin_resistance/", definition_amu, " - ", ifelse(amu_model_is_quanti, "Quantitative", "Qualitative"), " - ", effect_recent_amu, "/eta=", almost_one, "/c=", conc_used, "/resulpar_all_", definition_amu, "_isquanti", amu_model_is_quanti, "_", effect_recent_amu, "_c", conc_used, ".rdata"))
   
 }else{
   t = as.numeric(Sys.time())
@@ -1928,7 +1928,7 @@ server <- function(input, output){
   })
 }
 
-shinyApp(ui=ui, server=server)
+# shinyApp(ui=ui, server=server)
 
 ```
 
@@ -2101,7 +2101,7 @@ server <- function(input, output){
   })
 }
 
-shinyApp(ui=ui, server=server)
+# shinyApp(ui=ui, server=server)
 
 ```
 
@@ -2154,6 +2154,8 @@ pD = pD + blank()
 # com_plot = ggarrange(pC, pA, pB, pD, nrow = 2, ncol = 2, labels = c("A", "B", "C", "D))
 com_plot = ggarrange(pC, pA, pB, nrow = 1, ncol = 3, labels = c("A", "B", "C"))
 plot(com_plot)
+
+save(pB, file=paste0("C:/Users/Jonathan/Desktop/plot_eta=", almost_one, "_c=", conc_used, ".R"))
 
 ```
 
