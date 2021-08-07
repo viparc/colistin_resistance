@@ -493,7 +493,7 @@ for_fig_panel$lab[for_fig_panel$Conc. == 1] = "1 mg/L"
 
 # 18th line starting from above
 p2 = ggplot(data = for_fig_panel, aes(x=Time, y=od, group=Conc., label=lab))
-p2 = p2 + xlab("Time (hours)") + ylab("OD")
+p2 = p2 + xlab("Time (hours)") + ylab("optical density")
 p2 = p2 + geom_ribbon(data = for_fig_panel[for_fig_panel$Conc. == 1,], aes(x = Time, ymin = od, ymax=for_fig_panel$od[for_fig_panel$Conc. == 0]), alpha=0.2, fill="chartreuse4")
 p2 = p2 + geom_line(col="black", size=1)
 p2 = p2 + geom_label_repel(data = for_fig_panel[for_fig_panel$Time == 70,], xlim = c(3, 4), ylim = c(0.6, 1.4), direction = "y", hjust = 0)

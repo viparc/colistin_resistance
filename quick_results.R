@@ -117,4 +117,4 @@ all_plot = ggarrange(p_0.999_2, p_0.999_4, p_0.99_1, p_0.99_2, p_0.99_4, com_leg
 
 plot(all_plot)
 
-ggsave("C:/Users/Jonathan/Desktop/maps_robustness.png", all_plot, width = 20, height = 32, units = "cm")
+ggsave("C:/Users/Jonathan/Desktop/maps_robustness.png", all_plot, width = 23, height = 32, units = "cm")
